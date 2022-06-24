@@ -1,0 +1,19 @@
+[package]
+name = "extool"
+version = "1.1.0"
+authors = ["zhangwenjie@qq.com"]
+
+[dependencies]
+static_init = "1.0.2"
+quote = "1.0.18"
+serde = "1.0.137"
+serde_derive = "1.0.137"
+serde_json = "1.0.81"
+clap = { version = "3.2.5", features = ["derive"] }
+calamine = "0.18.0"
+num_cpus = "1.13.1"
+threads_pool = "0.2.6"
+Inflector = "0.11.4"
+ahash = "0.7.6"
+log = "0.4"
+env_logger = "0.9.0"
