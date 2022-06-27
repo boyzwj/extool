@@ -124,14 +124,14 @@ impl<'a> SheetData<'_> {
                 if self.front_types[i] != "" {
                     let column_name = &self.names[i];
                     let row_type = &self.front_types[i];
-                    let dic = &self.enums[i];
-                    if dic.len() == 0 {
+                    // let dic = &self.enums[i];
+                    if self.enums.len() == 0 || self.enums[i].len() == 0 {
                         let value =
                             cell_to_string(&rv[i], row_type, &self.output_file_name, &column_name);
                         columns.push(format!("{}", value.replace("[", "{").replace("]", "}")));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
-                        if let Some(x) = dic.get(value) {
+                        if let Some(x) = &self.enums[i].get(value) {
                             columns.push(format!("{}", x));
                         } else {
                             error!(
@@ -139,7 +139,7 @@ impl<'a> SheetData<'_> {
                                 column_name,
                                 &rv[1],
                                 value,
-                                dic.keys()
+                                &self.enums[i].keys()
                             );
                             panic!("abort")
                         }
@@ -153,7 +153,7 @@ impl<'a> SheetData<'_> {
                     &self.output_file_name,
                     &self.names[1],
                 );
-                res.push(format!("\t[{}] = {{ {} }}", keyvalue, columns.join(",\n")));
+                res.push(format!("\t[{}] = {{{}}}", keyvalue, columns.join(",")));
             }
         }
 
@@ -161,7 +161,7 @@ impl<'a> SheetData<'_> {
             return;
         }
         let out = format!(
-            "local KT = {{ {} }}\n\
+            "local KT = {{{}}}\n\
     local data = {{ \n {}\n}}\n\
     do\n\
     \tlocal base = {{\n\
@@ -171,7 +171,7 @@ impl<'a> SheetData<'_> {
     \t\t\t\treturn nil\n\
     \t\t\tend\n\
     \t\t\treturn table[ki]
-    \t\tend,\n\
+    \tend,\n\
     \t\t__newindex = function()\n\
     \t\t\terror([[Attempt to modify read-only table]])\n\
     \t\tend\n\

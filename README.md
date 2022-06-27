@@ -10,7 +10,17 @@
 
 ## 使用方法
 
-    extool -i 源文件目录  -o 输出文件目录 -f 输出格式[JSON|LUA|EX]
+* WINDOWS
+
+  ```bash
+  SET RUST_LOG=debug&&extool -i 源文件目录  -o 输出文件目录 -f 输出格式[JSON|LUA|EX]
+  ```
+
+* MAC/LINUX
+
+  ```bash
+  RUST_LOG=debug extool -i 源文件目录  -o 输出文件目录 -f 输出格式[JSON|LUA|EX]
+  ```
 
 ---------------------------------
 
