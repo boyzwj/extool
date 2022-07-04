@@ -364,14 +364,29 @@ pub fn sheet_to_data<'a>(
             for i in 0..row.len() {
                 let value = row[i].to_string().trim().to_string();
                 if refs.len() > 0 && refs[i] != "" && i > 0 {
-                    let key = format!("{}:{}", refs[i], &value);
                     //检查引用
-                    if !GLOBAL_IDS.read().contains(&key) {
-                        error!(
-                            "没找到引用的键值!File: {},Sheet: {},Row: {}, Key: {}",
-                            input_file_name, sheet_name, row_num, key
-                        );
-                        panic!("abort")
+                    if front_types[i] == "LIST" || back_types[i] == "LIST" {
+                        let vals: Vec<&str> = value.split(",").collect();
+                        for j in 0..vals.len() {
+                            let v = vals[j];
+                            let key = format!("{}:{}", refs[i], &v);
+                            if !GLOBAL_IDS.read().contains(&key) {
+                                error!(
+                                    "没找到引用的键值!File: {},Sheet: {},Row: {}, Key: {}",
+                                    input_file_name, sheet_name, row_num, key
+                                );
+                                panic!("abort")
+                            }
+                        }
+                    } else {
+                        let key = format!("{}:{}", refs[i], &value);
+                        if !GLOBAL_IDS.read().contains(&key) {
+                            error!(
+                                "没找到引用的键值!File: {},Sheet: {},Row: {}, Key: {}",
+                                input_file_name, sheet_name, row_num, key
+                            );
+                            panic!("abort")
+                        }
                     }
                 }
                 if enums.len() > 0 && enums[i].len() > 0 && i > 0 {
