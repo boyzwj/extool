@@ -284,14 +284,14 @@ pub fn build_id(input_file_name: String) {
                 row_num = row_num + 1;
                 let mut st = row[0].to_string().trim().to_string();
                 st.make_ascii_uppercase();
-                if st == "MODE_NAME" {
+                if st == "MOD" {
                     mod_name = row[1].to_string().trim().to_string();
                 } else if st == "VALUE" {
                     let key = format!("{}:{}", mod_name, row[1].to_string().trim().to_string());
                     if GLOBAL_IDS.read().contains(&key) {
                         error!(
-                            "配置了重复的键值!! File: [{}] Sheet: [{}], Row: {} Key: {} \n",
-                            &input_file_name, &sheet, row_num, &key
+                            "配置了重复的键值!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Key: {} \n",
+                            &input_file_name, &sheet,&mod_name, row_num, &key
                         );
                         panic!("abort");
                     } else {
@@ -321,7 +321,7 @@ pub fn sheet_to_data<'a>(
         row_num = row_num + 1;
         let mut st = row[0].to_string().trim().to_string();
         st.make_ascii_uppercase();
-        if st == "MODE_NAME" {
+        if st == "MOD" {
             mod_name = row[1].to_string().trim().to_string();
             output_file_name = row[1].to_string().trim().replace(".", "_").to_lowercase();
         } else if st == "NAMES" {
