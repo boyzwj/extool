@@ -363,7 +363,7 @@ pub fn sheet_to_data<'a>(
             let mut row_value: Vec<&DataType> = vec![];
             for i in 0..row.len() {
                 let value = row[i].to_string().trim().to_string();
-                if refs.len() > 0 && refs[i] != "" && i > 0 {
+                if refs.len() > 0 && refs[i] != "" && i > 0 && value != "" {
                     //检查引用
                     if front_types[i] == "LIST" || back_types[i] == "LIST" {
                         let vals: Vec<&str> = value.split(",").collect();
