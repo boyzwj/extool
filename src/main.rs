@@ -39,7 +39,6 @@ struct Args {
     format: String,
 }
 
-
 fn main() {
     env_logger::init();
     let args = Args::parse();
@@ -47,12 +46,12 @@ fn main() {
     match type_input.as_str() {
         "EXCEL" => gen_from_excel(args),
         "PROTO" => gen_from_proto(args),
-        _ => error!("type input={:?} is unsupport!", type_input),
+        _ => error!("type input={:?} is unsupported!", type_input),
     }
     // gen(args);
 }
 
-fn all_files(path_str: &str,exts: Vec<String>) -> Vec<String> {
+fn all_files(path_str: &str, exts: Vec<String>) -> Vec<String> {
     let mut res: Vec<String> = vec![];
     let objects = fs::read_dir(path_str).unwrap();
     for obj in objects {
@@ -121,12 +120,14 @@ fn gen_from_excel(args: Args) {
 }
 
 fn all_xls(path_str: &str) -> Vec<String> {
-    all_files(path_str,[String::from("xlsx"),String::from("xls")].to_vec())
+    all_files(
+        path_str,
+        [String::from("xlsx"), String::from("xls")].to_vec(),
+    )
 }
-
 
 fn gen_from_proto(args: Args) {
     let exts = [String::from("proto")].to_vec();
-    let files = all_files(args.input_path.as_str(),exts);
-    proto::create(files,&args.output_path,&args.format,&args.type_input);
+    let files = all_files(args.input_path.as_str(), exts);
+    proto::create(files, &args.output_path, &args.format, &args.type_input);
 }
