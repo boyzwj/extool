@@ -18,30 +18,57 @@ use std::time::SystemTime;
 use threads_pool::prelude::*;
 // use clap::{App, Arg, SubCommand};
 // use threads_pool::*;
-mod tool;
+mod excel;
+mod proto;
 use clap::Parser;
 /// Excel表格导出工具
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    ///Excel源文件目录
+    ///源文件类型 EXCEL|PROTO
+    #[clap(short, long, value_parser, default_value = "EXCEL")]
+    type_input: String,
+    ///源文件目录
     #[clap(short, long, value_parser, default_value = "./")]
     input_path: String,
     ///导出目录
     #[clap(short, long, value_parser, default_value = "./")]
     output_path: String,
-    ///导出格式 NONE | JSON | LUA | EX
+    ///导出格式 NONE | JSON | LUA | EX | CS
     #[clap(short, long, value_parser, default_value = "NONE")]
     format: String,
 }
 
+
 fn main() {
     env_logger::init();
     let args = Args::parse();
-    gen(args);
+    let type_input = args.type_input.to_uppercase();
+    match type_input.as_str() {
+        "EXCEL" => gen_from_excel(args),
+        "PROTO" => gen_from_proto(args),
+        _ => error!("type input={:?} is unsupport!", type_input),
+    }
+    // gen(args);
 }
 
-fn gen(args: Args) {
+fn all_files(path_str: &str,exts: Vec<String>) -> Vec<String> {
+    let mut res: Vec<String> = vec![];
+    let objects = fs::read_dir(path_str).unwrap();
+    for obj in objects {
+        let path = obj.unwrap().path();
+        match path.extension() {
+            Some(x) if exts.iter().any(|e| e.as_str() == x) => {
+                let p_str = format!("{}", path.display());
+                res.push(p_str);
+            }
+            _ => {}
+        }
+    }
+    res
+}
+
+fn gen_from_excel(args: Args) {
     let now = SystemTime::now();
     info!("导出格式: {} ", args.format);
     let xls_files = all_xls(args.input_path.as_str());
@@ -56,7 +83,7 @@ fn gen(args: Args) {
         let file1 = file.clone();
         let tx = tx.clone();
         pool.execute(move || {
-            tool::build_id(file1);
+            excel::build_id(file1);
             tx.send(()).unwrap();
         })
         .ok();
@@ -72,7 +99,7 @@ fn gen(args: Args) {
         let dst_path = args.output_path.clone();
         let format = args.format.clone();
         pool.execute(move || {
-            tool::xls_to_file(file1, dst_path, format);
+            excel::xls_to_file(file1, dst_path, format);
             tx.send(()).unwrap();
         })
         .ok();
@@ -94,17 +121,12 @@ fn gen(args: Args) {
 }
 
 fn all_xls(path_str: &str) -> Vec<String> {
-    let mut res: Vec<String> = vec![];
-    let objects = fs::read_dir(path_str).unwrap();
-    for obj in objects {
-        let path = obj.unwrap().path();
-        match path.extension() {
-            Some(x) if x == "xlsx" || x == "xls" => {
-                let p_str = format!("{}", path.display());
-                res.push(p_str);
-            }
-            _ => {}
-        }
-    }
-    res
+    all_files(path_str,[String::from("xlsx"),String::from("xls")].to_vec())
+}
+
+
+fn gen_from_proto(args: Args) {
+    let exts = [String::from("proto")].to_vec();
+    let files = all_files(args.input_path.as_str(),exts);
+    proto::create(files,&args.output_path,&args.format,&args.type_input);
 }

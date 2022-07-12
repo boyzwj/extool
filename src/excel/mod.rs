@@ -4,7 +4,6 @@ use inflector::Inflector;
 use serde_json;
 use serde_json::value::Value;
 use serde_json::Map;
-
 //use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};

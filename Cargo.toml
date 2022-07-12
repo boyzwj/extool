@@ -1,6 +1,6 @@
 [package]
 name = "extool"
-version = "1.1.0"
+version = "1.2.0"
 authors = ["zhangwenjie@qq.com"]
 
 [dependencies]
@@ -17,3 +17,4 @@ Inflector = "0.11.4"
 ahash = "0.7.6"
 log = "0.4"
 env_logger = "0.9.0"
+md5 = "0.7.0"

@@ -3,3 +3,5 @@
 **/*.rs.bk
 /*.json
 /*.xml
+proto
+.vscode/launch.json
