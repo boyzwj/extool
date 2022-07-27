@@ -288,9 +288,9 @@ impl<'a> SheetData<'_> {
             let ft = &self.front_types[i];
             let fk = &self.names[i];
             let des = &self.describes[i];
-
+            let enu = &self.enums[i];
             if ft != "" && fk != "" {
-                let (field_schema, front_type) = match ft.as_str() {
+                let (mut field_schema, mut front_type) = match ft.as_str() {
                     "STRING" => ("string".to_string(), "string"),
                     "INT" => ("int64".to_string(), "int64"),
                     "INT32" => ("int64".to_string(), "int64"),
@@ -325,6 +325,10 @@ impl<'a> SheetData<'_> {
                     }
                     _ => ("string".to_string(), "string"),
                 };
+                if !front_type.contains("list") && !enu.is_empty() {
+                    field_schema = "uint32".to_string();
+                    front_type = "enum";
+                }
                 field_schemas.push(format!("\t{} {} = {}; //{}", &field_schema, fk, n, des));
                 valid_columns.push(i);
                 valid_front_types.push(front_type);
@@ -396,9 +400,24 @@ impl<'a> SheetData<'_> {
                 let ft = valid_front_types[y];
                 let fk = &self.names[i];
                 let fv = self.values[x][i];
-                let p_val = cell_to_pvalue(fv, ft, &self.mod_name, fk);
-                // println!("ft: {},fk: {},fv: {:?},p_val: {:?}", ft, fk, fv, p_val);
-                dm.set_field_by_name(fk, p_val)
+                let enu_val = &fv.to_string().trim().to_string();
+                if ft == "enum" {
+                    if let Some(x) = self.enums[i].get(enu_val) {
+                        dm.set_field_by_name(fk, PValue::U32(*x as u32));
+                    } else {
+                        error!(
+                            "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {:?} 中",
+                            fk,
+                            &self.values[x][1],
+                            enu_val,
+                            &self.enums[i].keys()
+                        );
+                    }
+                } else {
+                    let p_val = cell_to_pvalue(fv, ft, &self.mod_name, fk);
+                    // println!("ft: {},fk: {},fv: {:?},p_val: {:?}", ft, fk, fv, p_val);
+                    dm.set_field_by_name(fk, p_val);
+                }
             }
             let key_val = dm.get_field_by_name_mut(key_name).unwrap().clone();
             let dy_msg = PValue::Message(dm);
