@@ -1,4 +1,4 @@
-# Excel导出工具(游戏开发)
+# 导出工具(游戏开发)
 
 ## 特性
 
@@ -10,16 +10,27 @@
 
 ## 使用方法
 
+目前支持源文件类型为 `EXCEL` 和 `PROTO` 两种方式:
+
+
 * WINDOWS
 
   ```bash
-  SET RUST_LOG=debug&&extool -i 源文件目录  -o 输出文件目录 -f 输出格式[JSON|LUA|EX]
+  //EXCEL
+  SET RUST_LOG=debug&&extool -t 源文件类型[EXCEL] -i 源文件目录  -o 输出文件目录 -f 输出格式[JSON|LUA|EX|PBD]
+
+  //PROTO
+  SET RUST_LOG=debug&&extool -t 源文件类型[PROTO] -i 源文件目录  -o 输出文件目录 -f 输出格式[LUA|CS]
   ```
 
 * MAC/LINUX
 
   ```bash
-  RUST_LOG=debug extool -i 源文件目录  -o 输出文件目录 -f 输出格式[JSON|LUA|EX]
+  //EXCEL
+  RUST_LOG=debug extool -t 源文件类型[EXCEL] -i 源文件目录  -o 输出文件目录 -f 输出格式[JSON|LUA|EX|PBD]
+
+  //PROTO
+  RUST_LOG=debug extool -t 源文件类型[PROTO] -i 源文件目录  -o 输出文件目录 -f 输出格式[LUA|CS]
   ```
 
 ---------------------------------

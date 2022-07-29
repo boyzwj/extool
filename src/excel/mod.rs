@@ -11,12 +11,11 @@ use prost_reflect::{MapKey, Value as PValue};
 use regex::Regex;
 use static_init::dynamic;
 use std::collections::HashMap;
-use std::env;
-use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::process::Command;
 use std::string::String;
+use std::{env, fs};
 #[dynamic]
 static mut GLOBAL_IDS: AHashSet<String> = AHashSet::new();
 
@@ -293,10 +292,10 @@ impl<'a> SheetData<'_> {
                 let (mut field_schema, mut front_type) = match ft.as_str() {
                     "STRING" => ("string".to_string(), "string"),
                     "INT" => ("int64".to_string(), "int64"),
-                    "INT32" => ("int64".to_string(), "int64"),
+                    "INT32" => ("int32".to_string(), "int32"),
                     "INT64" => ("int64".to_string(), "int64"),
-                    "UINT32" => ("int64".to_string(), "int64"),
-                    "UINT64" => ("int64".to_string(), "int64"),
+                    "UINT32" => ("uint32".to_string(), "uint32"),
+                    "UINT64" => ("uint64".to_string(), "uint64"),
                     "FLOAT" => ("double".to_string(), "float"),
                     "LIST" => {
                         let mut dt = "list,string";
@@ -374,15 +373,10 @@ impl<'a> SheetData<'_> {
 
         // builder bin data
         let mut builder = prost_reflect_build::Builder::new();
-        let out_dir = env::var_os("OUT_DIR")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-        let bin_path = format!("{}/{}.bin", out_dir, msg_name);
+        let bin_path = format!("{}/{}.bin", out_path, msg_name);
         builder.file_descriptor_set_path(&bin_path);
-        builder.compile_protos(&[&path_str], &[out_path]).unwrap();
-
+        env::set_var("OUT_DIR", out_path);
+        builder.compile_protos(&[&path_str], &["."]).unwrap();
         // new  messagedescriptor
         let bytes = fs::read(&bin_path).unwrap();
         let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
@@ -422,7 +416,10 @@ impl<'a> SheetData<'_> {
             let key_val = dm.get_field_by_name_mut(key_name).unwrap().clone();
             let dy_msg = PValue::Message(dm);
             match key_val {
+                PValue::I32(ref s) => data.insert(MapKey::I32(*s), dy_msg),
                 PValue::I64(ref s) => data.insert(MapKey::I64(*s), dy_msg),
+                PValue::U32(ref s) => data.insert(MapKey::U32(*s), dy_msg),
+                PValue::U64(ref s) => data.insert(MapKey::U64(*s), dy_msg),
                 PValue::String(ref s) => data.insert(MapKey::String(s.to_string()), dy_msg),
                 _ => {
                     error!("键值的数据类型不对! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Key: {}\n", &self.input_file_name,&self.sheet_name,&self.mod_name,row,key_name);
@@ -614,7 +611,11 @@ pub fn create_pbd_file(out_path: &String) {
 
     for obj in objects {
         let path = obj.unwrap().path();
-        if path.display().to_string().ends_with(".proto") {
+        let temp_path = path.display().to_string();
+        if temp_path.ends_with(".bin")
+            || temp_path.ends_with(".rs")
+            || temp_path.ends_with(".proto")
+        {
             fs::remove_file(path).ok();
         }
     }
@@ -748,11 +749,38 @@ fn cell_to_string(cell: &DataType, row_type: &String, filename: &String, key: &S
 
 fn cell_to_pvalue(cell: &DataType, row_type: &str, filename: &String, key: &String) -> PValue {
     match cell {
-        // int
+        // int32
+        &DataType::Int(ref s) if row_type == "int32" => PValue::I32(*s as i32),
+        &DataType::Float(f) if row_type == "int32" => PValue::I32(f as i32),
+        &DataType::String(ref s) if row_type == "int32" => PValue::I32(
+            s.parse::<i32>()
+                .ok()
+                .expect(parse_err(filename, key, s).as_str()),
+        ),
+
+        // int64
         &DataType::Int(ref s) if row_type == "int64" => PValue::I64(*s),
         &DataType::Float(f) if row_type == "int64" => PValue::I64(f as i64),
         &DataType::String(ref s) if row_type == "int64" => PValue::I64(
             s.parse::<i64>()
+                .ok()
+                .expect(parse_err(filename, key, s).as_str()),
+        ),
+
+        // uint32
+        &DataType::Int(ref s) if row_type == "uint32" => PValue::U32(*s as u32),
+        &DataType::Float(f) if row_type == "uint32" => PValue::U32(f as u32),
+        &DataType::String(ref s) if row_type == "uint32" => PValue::U32(
+            s.parse::<u32>()
+                .ok()
+                .expect(parse_err(filename, key, s).as_str()),
+        ),
+
+        // uint64
+        &DataType::Int(ref s) if row_type == "uint64" => PValue::U64(*s as u64),
+        &DataType::Float(f) if row_type == "uint64" => PValue::U64(f as u64),
+        &DataType::String(ref s) if row_type == "uint64" => PValue::U64(
+            s.parse::<u64>()
                 .ok()
                 .expect(parse_err(filename, key, s).as_str()),
         ),
@@ -811,7 +839,10 @@ fn cell_to_pvalue(cell: &DataType, row_type: &str, filename: &String, key: &Stri
         }
 
         &DataType::DateTime(x) => PValue::String(x.to_string()),
+        &DataType::Empty if row_type == "int32" => PValue::I32(0),
         &DataType::Empty if row_type == "int64" => PValue::I64(0),
+        &DataType::Empty if row_type == "uint32" => PValue::U32(0),
+        &DataType::Empty if row_type == "uint64" => PValue::U64(0),
         &DataType::Empty if row_type == "float" => PValue::F64(0.0),
         &DataType::Empty if row_type == "string" => PValue::String("".to_string()),
         &DataType::String(ref s) => PValue::String(s.to_string()),
