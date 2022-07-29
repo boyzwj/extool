@@ -90,8 +90,9 @@ impl<'a> SheetData<'_> {
                     let column_name = &self.names[i];
                     let row_type = &self.front_types[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                        let real_type = &get_real_front_type(&self.refs[i], row_type);
                         let value =
-                            cell_to_json(&rv[i], &row_type, &self.output_file_name, &column_name);
+                            cell_to_json(&rv[i], &real_type, &self.output_file_name, &column_name);
                         map.insert(column_name.to_string(), value);
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
@@ -144,8 +145,9 @@ impl<'a> SheetData<'_> {
                     let row_type = &self.front_types[i];
                     // let dic = &self.enums[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                        let real_type = &get_real_front_type(&self.refs[i], row_type);
                         let value =
-                            cell_to_string(&rv[i], row_type, &self.output_file_name, &column_name);
+                            cell_to_string(&rv[i], real_type, &self.output_file_name, &column_name);
                         columns.push(format!("{}", value.replace("[", "{").replace("]", "}")));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
@@ -217,8 +219,10 @@ impl<'a> SheetData<'_> {
                     let column_name = &self.names[i];
                     let row_type = &self.back_types[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                        let real_type = &get_real_back_type(&self.refs[i], row_type);
+
                         let value =
-                            cell_to_string(&rv[i], row_type, &self.output_file_name, &column_name);
+                            cell_to_string(&rv[i], real_type, &self.output_file_name, &column_name);
                         columns.push(format!("\t\t\t{}: {}", column_name, value));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
@@ -328,14 +332,13 @@ impl<'a> SheetData<'_> {
                     column_type => (column_type.to_lowercase(), column_type.to_string()),
                 };
                 if !front_type.contains("LIST") && !enu.is_empty() {
-                    field_schema = "uint32".to_string();
                     front_type = "ENUM".to_string();
+                    field_schema = "uint32".to_string();
                 }
                 let fr = &self.refs[i];
                 if enu.is_empty() && !fr.is_empty() {
-                    let real_ft = GLOBAL_FRONT_PRIMARYS.read().get(fr).unwrap().to_string();
-                    field_schema = real_ft.to_lowercase();
-                    front_type = real_ft;
+                    front_type = get_real_front_type(fr, &front_type);
+                    field_schema = front_type.to_lowercase();
                 }
                 field_schemas.push(format!("\t{} {} = {}; //{}", &field_schema, fk, n, des));
                 valid_columns.push(i);
@@ -910,4 +913,26 @@ fn get_module_name(fname: String) -> String {
         .to_train_case()
         .replace("-", ".");
     return a;
+}
+
+fn get_real_front_type(mod_name: &String, old_type: &String) -> String {
+    if mod_name.trim().is_empty() {
+        return old_type.to_string();
+    }
+    if let Some(x) = GLOBAL_FRONT_PRIMARYS.read().get(mod_name) {
+        return x.to_string();
+    } else {
+        return old_type.to_string();
+    }
+}
+
+fn get_real_back_type(mod_name: &String, old_type: &String) -> String {
+    if mod_name.trim().is_empty() {
+        return old_type.to_string();
+    }
+    if let Some(x) = GLOBAL_BACK_PRIMARYS.read().get(mod_name) {
+        return x.to_string();
+    } else {
+        return old_type.to_string();
+    }
 }
