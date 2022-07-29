@@ -20,6 +20,12 @@ use std::{env, fs};
 static mut GLOBAL_IDS: AHashSet<String> = AHashSet::new();
 
 #[dynamic]
+static mut GLOBAL_FRONT_PRIMARYS: AHashMap<String, String> = AHashMap::new();
+
+#[dynamic]
+static mut GLOBAL_BACK_PRIMARYS: AHashMap<String, String> = AHashMap::new();
+
+#[dynamic]
 static mut GLOBAL_PBD: Vec<String> = Vec::new();
 
 // static mut
@@ -39,13 +45,14 @@ pub struct SheetData<'a> {
 
 impl<'a> SheetData<'_> {
     pub fn export(&self, format: &String, dst_path: &String) {
-        if format == "JSON" {
+        let temp = format.to_uppercase();
+        if temp == "JSON" {
             self.data_to_json(&dst_path);
-        } else if format == "LUA" {
+        } else if temp == "LUA" {
             self.data_to_lua(&dst_path);
-        } else if format == "EX" {
+        } else if temp == "EX" {
             self.data_to_ex(&dst_path);
-        } else if format == "PBD" {
+        } else if temp == "PBD" {
             self.data_to_pbd(&dst_path);
         }
     }
@@ -282,7 +289,7 @@ impl<'a> SheetData<'_> {
         let float_reg = Regex::new(r"^-?([1-9]\d*\.\d*|0\.\d*[1-9]\d*|0?\.0+|0)$").unwrap();
         let integer_reg = Regex::new(r"^-?[0-9]*$").unwrap();
         let mut valid_columns: Vec<usize> = vec![];
-        let mut valid_front_types: Vec<&str> = vec![];
+        let mut valid_front_types: Vec<String> = vec![];
         for i in 1..self.front_types.len() {
             let ft = &self.front_types[i];
             let fk = &self.names[i];
@@ -290,15 +297,10 @@ impl<'a> SheetData<'_> {
             let enu = &self.enums[i];
             if ft != "" && fk != "" {
                 let (mut field_schema, mut front_type) = match ft.as_str() {
-                    "STRING" => ("string".to_string(), "string"),
-                    "INT" => ("int64".to_string(), "int64"),
-                    "INT32" => ("int32".to_string(), "int32"),
-                    "INT64" => ("int64".to_string(), "int64"),
-                    "UINT32" => ("uint32".to_string(), "uint32"),
-                    "UINT64" => ("uint64".to_string(), "uint64"),
-                    "FLOAT" => ("double".to_string(), "float"),
+                    "INT" => ("int64".to_string(), "INT64".to_string()),
+                    "FLOAT" => ("double".to_string(), "FLOAT".to_string()),
                     "LIST" => {
-                        let mut dt = "list,string";
+                        let mut dt = "LIST,STRING".to_string();
                         let mut fs = format!("repeated {}", "string");
                         for j in 0..self.values.len() {
                             let temp = &self.values[j][i].to_string();
@@ -308,13 +310,13 @@ impl<'a> SheetData<'_> {
                             let list: Vec<&str> = temp.split(',').collect();
                             let v1 = list[0];
                             if float_reg.is_match(v1) {
-                                dt = "list,float";
+                                dt = "LIST,FLOAT".to_string();
                                 fs = format!("repeated {}", "double");
                                 break;
                             }
 
                             if integer_reg.is_match(v1) {
-                                dt = "list,int64";
+                                dt = "LIST,INT64".to_string();
                                 fs = format!("repeated {}", "int64");
                                 break;
                             }
@@ -322,11 +324,18 @@ impl<'a> SheetData<'_> {
                         }
                         (fs, dt)
                     }
-                    _ => ("string".to_string(), "string"),
+                    "LOC_STRING" => ("string".to_string(), "STRING".to_string()),
+                    column_type => (column_type.to_lowercase(), column_type.to_string()),
                 };
-                if !front_type.contains("list") && !enu.is_empty() {
+                if !front_type.contains("LIST") && !enu.is_empty() {
                     field_schema = "uint32".to_string();
-                    front_type = "enum";
+                    front_type = "ENUM".to_string();
+                }
+                let fr = &self.refs[i];
+                if enu.is_empty() && !fr.is_empty() {
+                    let real_ft = GLOBAL_FRONT_PRIMARYS.read().get(fr).unwrap().to_string();
+                    field_schema = real_ft.to_lowercase();
+                    front_type = real_ft;
                 }
                 field_schemas.push(format!("\t{} {} = {}; //{}", &field_schema, fk, n, des));
                 valid_columns.push(i);
@@ -345,10 +354,10 @@ impl<'a> SheetData<'_> {
             field_schemas.join("\n")
         );
         let key_name = &self.names[valid_columns[0]];
-        if valid_front_types[0] == "float" {
+        if !valid_front_types[0].contains("INT") {
             error!(
-                "主键 [{}] 不支持double类型! File: [{}] Sheet: [{}],Mod_name: [{}] Key: {}\n",
-                key_name, &self.input_file_name, &self.sheet_name, &self.mod_name, key_name
+                "主键 [{}] 仅支持整型类型! File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
+                key_name, &self.input_file_name, &self.sheet_name, &self.mod_name, key_name, valid_front_types[0]
             );
             panic!("abort");
         }
@@ -357,7 +366,10 @@ impl<'a> SheetData<'_> {
              \tmap<{},{}> data = 1;\n\
             }}\n\
             {}",
-            msg_name, &valid_front_types[0], msg_name, msg_schema
+            msg_name,
+            &valid_front_types[0].to_lowercase(),
+            msg_name,
+            msg_schema
         );
 
         let content = format!(
@@ -391,11 +403,11 @@ impl<'a> SheetData<'_> {
             let mut dm = DynamicMessage::new(msg_des.clone());
             for y in 0..valid_columns.len() {
                 let i = valid_columns[y];
-                let ft = valid_front_types[y];
+                let ft = &valid_front_types[y];
                 let fk = &self.names[i];
                 let fv = self.values[x][i];
                 let enu_val = &fv.to_string().trim().to_string();
-                if ft == "enum" {
+                if ft == "ENUM" {
                     if let Some(x) = self.enums[i].get(enu_val) {
                         dm.set_field_by_name(fk, PValue::U32(*x as u32));
                     } else {
@@ -408,9 +420,16 @@ impl<'a> SheetData<'_> {
                         );
                     }
                 } else {
-                    let p_val = cell_to_pvalue(fv, ft, &self.mod_name, fk);
+                    let fr = &self.refs[i];
+                    if !fr.is_empty() {
+                        let new_ft = GLOBAL_FRONT_PRIMARYS.read().get(fr).unwrap().to_string();
+                        let p_val = cell_to_pvalue(fv, &new_ft, &self.mod_name, fk);
+                        dm.set_field_by_name(fk, p_val);
+                    } else {
+                        let p_val = cell_to_pvalue(fv, &ft.to_string(), &self.mod_name, fk);
+                        dm.set_field_by_name(fk, p_val);
+                    };
                     // println!("ft: {},fk: {},fv: {:?},p_val: {:?}", ft, fk, fv, p_val);
-                    dm.set_field_by_name(fk, p_val);
                 }
             }
             let key_val = dm.get_field_by_name_mut(key_name).unwrap().clone();
@@ -470,6 +489,26 @@ pub fn build_id(input_file_name: String) {
                         panic!("abort");
                     } else {
                         GLOBAL_IDS.write().insert(key);
+                    }
+                } else if st == "BACK_TYPE" {
+                    for i in 1..row.len() {
+                        let rv = row[i].clone().to_string().trim().to_uppercase();
+                        if !rv.is_empty() {
+                            GLOBAL_BACK_PRIMARYS
+                                .write()
+                                .insert(mod_name.to_string(), rv);
+                            break;
+                        }
+                    }
+                } else if st == "FRONT_TYPE" {
+                    for i in 1..row.len() {
+                        let rv = row[i].clone().to_string().trim().to_uppercase();
+                        if !rv.is_empty() {
+                            GLOBAL_FRONT_PRIMARYS
+                                .write()
+                                .insert(mod_name.to_string(), rv);
+                            break;
+                        }
                     }
                 }
             }
@@ -747,63 +786,63 @@ fn cell_to_string(cell: &DataType, row_type: &String, filename: &String, key: &S
     }
 }
 
-fn cell_to_pvalue(cell: &DataType, row_type: &str, filename: &String, key: &String) -> PValue {
+fn cell_to_pvalue(cell: &DataType, row_type: &String, filename: &String, key: &String) -> PValue {
     match cell {
-        // int32
-        &DataType::Int(ref s) if row_type == "int32" => PValue::I32(*s as i32),
-        &DataType::Float(f) if row_type == "int32" => PValue::I32(f as i32),
-        &DataType::String(ref s) if row_type == "int32" => PValue::I32(
+        // INT32
+        &DataType::Int(ref s) if row_type == "INT32" => PValue::I32(*s as i32),
+        &DataType::Float(f) if row_type == "INT32" => PValue::I32(f as i32),
+        &DataType::String(ref s) if row_type == "INT32" => PValue::I32(
             s.parse::<i32>()
                 .ok()
                 .expect(parse_err(filename, key, s).as_str()),
         ),
 
-        // int64
-        &DataType::Int(ref s) if row_type == "int64" => PValue::I64(*s),
-        &DataType::Float(f) if row_type == "int64" => PValue::I64(f as i64),
-        &DataType::String(ref s) if row_type == "int64" => PValue::I64(
+        // INT64
+        &DataType::Int(ref s) if row_type == "INT64" || row_type == "INT" => PValue::I64(*s),
+        &DataType::Float(f) if row_type == "INT64" || row_type == "INT" => PValue::I64(f as i64),
+        &DataType::String(ref s) if row_type == "INT64" || row_type == "INT" => PValue::I64(
             s.parse::<i64>()
                 .ok()
                 .expect(parse_err(filename, key, s).as_str()),
         ),
 
-        // uint32
-        &DataType::Int(ref s) if row_type == "uint32" => PValue::U32(*s as u32),
-        &DataType::Float(f) if row_type == "uint32" => PValue::U32(f as u32),
-        &DataType::String(ref s) if row_type == "uint32" => PValue::U32(
+        // UINT32
+        &DataType::Int(ref s) if row_type == "UINT32" => PValue::U32(*s as u32),
+        &DataType::Float(f) if row_type == "UINT32" => PValue::U32(f as u32),
+        &DataType::String(ref s) if row_type == "UINT32" => PValue::U32(
             s.parse::<u32>()
                 .ok()
                 .expect(parse_err(filename, key, s).as_str()),
         ),
 
-        // uint64
-        &DataType::Int(ref s) if row_type == "uint64" => PValue::U64(*s as u64),
-        &DataType::Float(f) if row_type == "uint64" => PValue::U64(f as u64),
-        &DataType::String(ref s) if row_type == "uint64" => PValue::U64(
+        // UINT64
+        &DataType::Int(ref s) if row_type == "UINT64" => PValue::U64(*s as u64),
+        &DataType::Float(f) if row_type == "UINT64" => PValue::U64(f as u64),
+        &DataType::String(ref s) if row_type == "UINT64" => PValue::U64(
             s.parse::<u64>()
                 .ok()
                 .expect(parse_err(filename, key, s).as_str()),
         ),
 
-        // float
-        &DataType::Int(ref s) if row_type == "float" => PValue::F64(*s as f64),
-        &DataType::Float(ref s) if row_type == "float" => PValue::F64(*s),
-        &DataType::String(ref s) if row_type == "float" => PValue::F64(
+        // FLOAT
+        &DataType::Int(ref s) if row_type == "FLOAT" => PValue::F64(*s as f64),
+        &DataType::Float(ref s) if row_type == "FLOAT" => PValue::F64(*s),
+        &DataType::String(ref s) if row_type == "FLOAT" => PValue::F64(
             s.parse::<f64>()
                 .ok()
                 .expect(parse_err(filename, key, s).as_str()),
         ),
 
-        // string
-        &DataType::Int(ref s) if row_type == "string" => PValue::String(s.to_string()),
-        &DataType::Float(ref s) if row_type == "string" => PValue::String(s.to_string()),
-        &DataType::String(ref s) if row_type == "string" => PValue::String(s.to_string()),
+        // STRING
+        &DataType::Int(ref s) if row_type == "STRING" => PValue::String(s.to_string()),
+        &DataType::Float(ref s) if row_type == "STRING" => PValue::String(s.to_string()),
+        &DataType::String(ref s) if row_type == "STRING" => PValue::String(s.to_string()),
 
-        // list
-        &DataType::Empty if row_type.contains("list") => PValue::List([].to_vec()),
-        &DataType::Int(f) if row_type == "list,int64" => PValue::List(vec![PValue::I64(f)]),
-        &DataType::Float(f) if row_type == "list,float" => PValue::List(vec![PValue::F64(f)]),
-        &DataType::String(ref s) if row_type == "list,string" => {
+        // LIST
+        &DataType::Empty if row_type.contains("LIST") => PValue::List([].to_vec()),
+        &DataType::Int(f) if row_type == "LIST,INT64" => PValue::List(vec![PValue::I64(f)]),
+        &DataType::Float(f) if row_type == "LIST,FLOAT" => PValue::List(vec![PValue::F64(f)]),
+        &DataType::String(ref s) if row_type == "LIST,STRING" => {
             let list: Vec<&str> = s.split(',').collect();
             let mut result: Vec<PValue> = vec![];
             for i in 0..list.len() {
@@ -811,7 +850,7 @@ fn cell_to_pvalue(cell: &DataType, row_type: &str, filename: &String, key: &Stri
             }
             PValue::List(result)
         }
-        &DataType::String(ref s) if row_type == "list,float" => {
+        &DataType::String(ref s) if row_type == "LIST,FLOAT" => {
             let list: Vec<&str> = s.split(',').collect();
             let mut result: Vec<PValue> = vec![];
             for i in 0..list.len() {
@@ -824,7 +863,7 @@ fn cell_to_pvalue(cell: &DataType, row_type: &str, filename: &String, key: &Stri
             }
             PValue::List(result)
         }
-        &DataType::String(ref s) if row_type == "list,int64" => {
+        &DataType::String(ref s) if row_type == "LIST,INT64" => {
             let list: Vec<&str> = s.split(',').collect();
             let mut result: Vec<PValue> = vec![];
             for i in 0..list.len() {
@@ -839,12 +878,12 @@ fn cell_to_pvalue(cell: &DataType, row_type: &str, filename: &String, key: &Stri
         }
 
         &DataType::DateTime(x) => PValue::String(x.to_string()),
-        &DataType::Empty if row_type == "int32" => PValue::I32(0),
-        &DataType::Empty if row_type == "int64" => PValue::I64(0),
-        &DataType::Empty if row_type == "uint32" => PValue::U32(0),
-        &DataType::Empty if row_type == "uint64" => PValue::U64(0),
-        &DataType::Empty if row_type == "float" => PValue::F64(0.0),
-        &DataType::Empty if row_type == "string" => PValue::String("".to_string()),
+        &DataType::Empty if row_type == "INT32" => PValue::I32(0),
+        &DataType::Empty if row_type == "INT64" || row_type == "INT" => PValue::I64(0),
+        &DataType::Empty if row_type == "UINT32" => PValue::U32(0),
+        &DataType::Empty if row_type == "UINT64" => PValue::U64(0),
+        &DataType::Empty if row_type == "FLOAT" => PValue::F64(0.0),
+        &DataType::Empty if row_type == "STRING" => PValue::String("".to_string()),
         &DataType::String(ref s) => PValue::String(s.to_string()),
         &DataType::Bool(b) => PValue::Bool(b),
         &DataType::Float(f) => PValue::F64(f),
