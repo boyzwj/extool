@@ -671,121 +671,127 @@ pub fn create_pbd_file(out_path: &String) {
         .expect("failed to execute process");
 }
 
-fn cell_to_json(cell: &DataType, row_type: &String, filename: &String, key: &String) -> Value {
-    match cell {
-        &DataType::Float(f) if row_type.contains("INT") => json!(f as i64),
-
-        &DataType::String(ref s) if row_type.contains("INT") => match s.parse::<i64>() {
-            Ok(x) => json!(x),
-            Err(e) => {
-                error!("ParseError:{:?}, {}, {:?}", e, filename, cell);
-                Value::Null
-            }
+fn is_number_str(value: &str) -> bool {
+    match value.parse::<i64>() {
+        Ok(_) => true,
+        Err(_) => match value.parse::<f64>() {
+            Ok(_) => true,
+            Err(_) => false,
         },
-        &DataType::String(ref s) if row_type == "FLOAT" => json!(s
-            .parse::<f64>()
-            .ok()
-            .expect(parse_err(filename, key, s).as_str())),
-        &DataType::String(ref s) if row_type.contains("INT") => json!(s
+    }
+}
+
+fn cell_to_json(cell: &DataType, row_type: &String, filename: &String, key: &String) -> Value {
+    let s = cell.to_string().trim().to_string();
+    if row_type.starts_with("INT") || row_type.starts_with("UINT") {
+        if s == "" {
+            return json!(0);
+        }
+        json!(s
             .parse::<i64>()
             .ok()
-            .expect(parse_err(filename, key, s).as_str())),
-        &DataType::String(ref s)
-            if row_type == "STRING" || row_type == "CODE" || row_type == "JSON" =>
-        {
-            json!(s)
+            .expect(parse_err(filename, row_type, &s).as_str()))
+    } else if row_type.starts_with("FLOAT") {
+        if s == "" {
+            return json!(0);
         }
-        &DataType::Empty if row_type == "LIST" => json!([]),
-        &DataType::String(ref s) if row_type == "JSON" => json!(s),
-        &DataType::String(ref s) if row_type == "LIST" => {
+        json!(s
+            .parse::<f64>()
+            .ok()
+            .expect(parse_err(filename, key, &s).as_str()))
+    } else if row_type.starts_with("LIST_UINT")
+        || row_type.starts_with("LIST_INT")
+        || row_type.starts_with("LIST_FLOAT")
+    {
+        if s == "" {
+            return json!([]);
+        }
+
+        let final_str = format!("[{}]", s);
+        let data: Value = serde_json::from_str(final_str.as_str()).unwrap();
+        json!(data)
+    } else if row_type.starts_with("LIST_STRING") {
+        if s == "" {
+            return json!([]);
+        }
+        let mut data: Vec<Value> = vec![];
+        let list: Vec<&str> = s.split(',').collect();
+        for val in list {
+            data.push(json!(val))
+        }
+        json!(data)
+    } else if row_type == "LIST" {
+        if s == "" {
+            return json!([]);
+        }
+        let list: Vec<&str> = s.split(',').collect();
+        if list.clone().into_iter().any(|x| is_number_str(x) == false) {
+            let mut data: Vec<Value> = vec![];
+            for val in list {
+                data.push(json!(val))
+            }
+            json!(data)
+        } else {
             let final_str = format!("[{}]", s);
-            let data: Value = serde_json::from_str(final_str.as_str())
-                .ok()
-                .expect(parse_err(filename, key, s).as_str());
-            json!(data)
-        }
-
-        &DataType::Float(f) if row_type == "LIST" => {
-            let final_str = format!("[{}]", f);
             let data: Value = serde_json::from_str(final_str.as_str()).unwrap();
             json!(data)
         }
-
-        &DataType::Int(f) if row_type == "LIST" => {
-            let final_str = format!("[{}]", f);
-            let data: Value = serde_json::from_str(final_str.as_str()).unwrap();
-            json!(data)
-        }
-        &DataType::DateTime(x) => json!(x),
-        &DataType::Empty if row_type == "FLOAT" || row_type.contains("INT") => json!(0),
-        &DataType::Empty if row_type == "STRING" => json!(""),
-        &DataType::String(ref s) => json!(s),
-        &DataType::Bool(b) => json!(b),
-        &DataType::Float(f) => json!(f),
-        &DataType::Int(i) => json!(i),
-        &DataType::Empty => Value::Null,
-        &DataType::Error(_) => Value::Null,
+    } else {
+        json!(s)
     }
 }
 
 fn cell_to_string(cell: &DataType, row_type: &String, filename: &String, key: &String) -> String {
-    match cell {
-        &DataType::Float(f) if row_type.contains("INT") => json!(f as i64).to_string(),
+    let s = cell.to_string().trim().to_string();
+    let s = cell.to_string().trim().to_string();
+    if row_type.starts_with("INT") || row_type.starts_with("UINT") || row_type.starts_with("FLOAT")
+    {
+        if s == "" {
+            return "0".to_string();
+        }
+        return s;
+    } else if row_type.starts_with("LIST_UINT")
+        || row_type.starts_with("LIST_INT")
+        || row_type.starts_with("LIST_FLOAT")
+    {
+        if s == "" {
+            return "[]".to_string();
+        }
 
-        &DataType::String(ref s) if row_type.contains("INT") => match s.parse::<i64>() {
-            Ok(x) => json!(x).to_string(),
-            Err(_) => {
-                error!("{},{:?}", filename, cell);
-                Value::Null.to_string()
+        return format!("[{}]", s);
+    } else if row_type.starts_with("LIST_STRING") {
+        if s == "" {
+            return "[]".to_string();
+        }
+        let mut data: Vec<Value> = vec![];
+        let list: Vec<&str> = s.split(',').collect();
+        for val in list {
+            data.push(json!(val))
+        }
+        json!(data).to_string()
+    } else if row_type == "LIST" {
+        if s == "" {
+            return "[]".to_string();
+        }
+        let list: Vec<&str> = s.split(',').collect();
+        if list.clone().into_iter().any(|x| is_number_str(x) == false) {
+            let mut data: Vec<Value> = vec![];
+            for val in list {
+                data.push(json!(val))
             }
-        },
-        &DataType::String(ref s) if row_type == "FLOAT" => json!(s
-            .parse::<f64>()
-            .ok()
-            .expect(parse_err(filename, key, s).as_str()))
-        .to_string(),
-        &DataType::String(ref s) if row_type.contains("INT") => json!(s
-            .parse::<i64>()
-            .ok()
-            .expect(parse_err(filename, key, s).as_str()))
-        .to_string(),
-        &DataType::String(ref s) if row_type == "ATOM" => format!(":{}", s).to_string(),
-
-        &DataType::String(ref s)
-            if row_type == "STRING" || row_type == "CODE" || row_type == "JSON" =>
-        {
-            json!(s).to_string()
-        }
-        &DataType::Empty if row_type == "LIST" => json!([]).to_string(),
-        &DataType::String(ref s) if row_type == "JSON" => json!(s).to_string(),
-        &DataType::String(ref s) if row_type == "LIST" => {
+            json!(data).to_string()
+        } else {
             let final_str = format!("[{}]", s);
-            let data: Value = serde_json::from_str(final_str.as_str())
-                .ok()
-                .expect(parse_err(filename, key, s).as_str());
-            json!(data).to_string()
-        }
-
-        &DataType::Float(f) if row_type == "LIST" => {
-            let final_str = format!("[{}]", f);
             let data: Value = serde_json::from_str(final_str.as_str()).unwrap();
             json!(data).to_string()
         }
-
-        &DataType::Int(f) if row_type == "LIST" => {
-            let final_str = format!("[{}]", f);
-            let data: Value = serde_json::from_str(final_str.as_str()).unwrap();
-            json!(data).to_string()
+    } else if row_type == "STRING" {
+        if s == "" {
+            return "\"\"".to_string();
         }
-        &DataType::DateTime(x) => json!(x).to_string(),
-        &DataType::Empty if row_type == "FLOAT" || row_type.contains("INT") => json!(0).to_string(),
-        &DataType::Empty if row_type == "STRING" => json!("").to_string(),
-        &DataType::String(ref s) => json!(s).to_string(),
-        &DataType::Bool(b) => json!(b).to_string(),
-        &DataType::Float(f) => json!(f).to_string(),
-        &DataType::Int(i) => json!(i).to_string(),
-        &DataType::Empty => "nil".to_string(),
-        &DataType::Error(_) => "nil".to_string(),
+        return format!("\"{}\"", s);
+    } else {
+        s
     }
 }
 
@@ -920,7 +926,11 @@ fn get_real_front_type(mod_name: &String, old_type: &String) -> String {
         return old_type.to_string();
     }
     if let Some(x) = GLOBAL_FRONT_PRIMARYS.read().get(mod_name) {
-        return x.to_string();
+        if old_type == "LIST" {
+            return format!("LIST_{}", x);
+        } else {
+            return x.to_string();
+        }
     } else {
         return old_type.to_string();
     }
@@ -931,7 +941,11 @@ fn get_real_back_type(mod_name: &String, old_type: &String) -> String {
         return old_type.to_string();
     }
     if let Some(x) = GLOBAL_BACK_PRIMARYS.read().get(mod_name) {
-        return x.to_string();
+        if old_type == "LIST" {
+            return format!("LIST_{}", x);
+        } else {
+            return x.to_string();
+        }
     } else {
         return old_type.to_string();
     }
