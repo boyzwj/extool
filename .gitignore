@@ -3,4 +3,4 @@
 **/*.rs.bk
 /*.json
 /*.xml
-.vscode/launch.json
+.vscode/*

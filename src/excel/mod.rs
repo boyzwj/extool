@@ -5,13 +5,28 @@ use serde_json;
 use serde_json::value::Value;
 use serde_json::Map;
 //use std::collections::HashMap;
+use prost::Message;
+use prost_reflect::{DescriptorPool, DynamicMessage};
+use prost_reflect::{MapKey, Value as PValue};
+use regex::Regex;
+use static_init::dynamic;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::process::Command;
 use std::string::String;
-
-use static_init::dynamic;
+use std::{env, fs};
 #[dynamic]
 static mut GLOBAL_IDS: AHashSet<String> = AHashSet::new();
+
+#[dynamic]
+static mut GLOBAL_FRONT_PRIMARYS: AHashMap<String, String> = AHashMap::new();
+
+#[dynamic]
+static mut GLOBAL_BACK_PRIMARYS: AHashMap<String, String> = AHashMap::new();
+
+#[dynamic]
+static mut GLOBAL_PBD: Vec<String> = Vec::new();
 
 // static mut
 pub struct SheetData<'a> {
@@ -23,18 +38,22 @@ pub struct SheetData<'a> {
     refs: Vec<String>,
     front_types: Vec<String>,
     back_types: Vec<String>,
+    describes: Vec<String>,
     enums: Vec<AHashMap<String, usize>>,
     values: Vec<Vec<&'a DataType>>,
 }
 
 impl<'a> SheetData<'_> {
     pub fn export(&self, format: &String, dst_path: &String) {
-        if format == "JSON" {
+        let temp = format.to_uppercase();
+        if temp == "JSON" {
             self.data_to_json(&dst_path);
-        } else if format == "LUA" {
+        } else if temp == "LUA" {
             self.data_to_lua(&dst_path);
-        } else if format == "EX" {
+        } else if temp == "EX" {
             self.data_to_ex(&dst_path);
+        } else if temp == "PBD" {
+            self.data_to_pbd(&dst_path);
         }
     }
 
@@ -71,8 +90,9 @@ impl<'a> SheetData<'_> {
                     let column_name = &self.names[i];
                     let row_type = &self.front_types[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                        let real_type = &get_real_front_type(&self.refs[i], row_type);
                         let value =
-                            cell_to_json(&rv[i], &row_type, &self.output_file_name, &column_name);
+                            cell_to_json(&rv[i], &real_type, &self.output_file_name, &column_name);
                         map.insert(column_name.to_string(), value);
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
@@ -125,8 +145,9 @@ impl<'a> SheetData<'_> {
                     let row_type = &self.front_types[i];
                     // let dic = &self.enums[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                        let real_type = &get_real_front_type(&self.refs[i], row_type);
                         let value =
-                            cell_to_string(&rv[i], row_type, &self.output_file_name, &column_name);
+                            cell_to_string(&rv[i], real_type, &self.output_file_name, &column_name);
                         columns.push(format!("{}", value.replace("[", "{").replace("]", "}")));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
@@ -198,8 +219,10 @@ impl<'a> SheetData<'_> {
                     let column_name = &self.names[i];
                     let row_type = &self.back_types[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                        let real_type = &get_real_back_type(&self.refs[i], row_type);
+
                         let value =
-                            cell_to_string(&rv[i], row_type, &self.output_file_name, &column_name);
+                            cell_to_string(&rv[i], real_type, &self.output_file_name, &column_name);
                         columns.push(format!("\t\t\t{}: {}", column_name, value));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
@@ -259,6 +282,180 @@ impl<'a> SheetData<'_> {
         let path_str = format!("{}/{}.ex", dst_path, self.output_file_name);
         self.write_file(&path_str, &out);
     }
+
+    pub fn data_to_pbd(&self, out_path: &String) {
+        if self.mod_name == "" {
+            return;
+        }
+        let mut field_schemas: Vec<String> = vec![];
+        let msg_name = self.mod_name.to_string().replace("Data.", "");
+        let mut n = 1;
+        let float_reg = Regex::new(r"^-?([1-9]\d*\.\d*|0\.\d*[1-9]\d*|0?\.0+|0)$").unwrap();
+        let integer_reg = Regex::new(r"^-?[0-9]*$").unwrap();
+        let mut valid_columns: Vec<usize> = vec![];
+        let mut valid_front_types: Vec<String> = vec![];
+        for i in 1..self.front_types.len() {
+            let ft = &self.front_types[i];
+            let fk = &self.names[i];
+            let des = &self.describes[i];
+            let enu = &self.enums[i];
+            if ft != "" && fk != "" {
+                let (mut field_schema, mut front_type) = match ft.as_str() {
+                    "INT" => ("int64".to_string(), "INT64".to_string()),
+                    "FLOAT" => ("double".to_string(), "FLOAT".to_string()),
+                    "LIST" => {
+                        let mut dt = "LIST,STRING".to_string();
+                        let mut fs = format!("repeated {}", "string");
+                        for j in 0..self.values.len() {
+                            let temp = &self.values[j][i].to_string();
+                            if temp == "" {
+                                continue;
+                            }
+                            let list: Vec<&str> = temp.split(',').collect();
+                            let v1 = list[0];
+                            if float_reg.is_match(v1) {
+                                dt = "LIST,FLOAT".to_string();
+                                fs = format!("repeated {}", "double");
+                                break;
+                            }
+
+                            if integer_reg.is_match(v1) {
+                                dt = "LIST,INT64".to_string();
+                                fs = format!("repeated {}", "int64");
+                                break;
+                            }
+                            break;
+                        }
+                        (fs, dt)
+                    }
+                    "LOC_STRING" => ("string".to_string(), "STRING".to_string()),
+                    column_type => (column_type.to_lowercase(), column_type.to_string()),
+                };
+                if !front_type.contains("LIST") && !enu.is_empty() {
+                    front_type = "ENUM".to_string();
+                    field_schema = "uint32".to_string();
+                }
+                let fr = &self.refs[i];
+                if enu.is_empty() && !fr.is_empty() {
+                    front_type = get_real_front_type(fr, &front_type);
+                    field_schema = front_type.to_lowercase();
+                }
+                field_schemas.push(format!("\t{} {} = {}; //{}", &field_schema, fk, n, des));
+                valid_columns.push(i);
+                valid_front_types.push(front_type);
+                n = n + 1;
+            }
+        }
+        if field_schemas.len() == 0 {
+            return;
+        }
+        let msg_schema = format!(
+            "message {}{{\n\
+            {}\n\
+            }}",
+            msg_name,
+            field_schemas.join("\n")
+        );
+        let key_name = &self.names[valid_columns[0]];
+        if !valid_front_types[0].contains("INT") {
+            error!(
+                "主键 [{}] 仅支持整型类型! File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
+                key_name, &self.input_file_name, &self.sheet_name, &self.mod_name, key_name, valid_front_types[0]
+            );
+            panic!("abort");
+        }
+        let out = format!(
+            "message {}Info{{\n\
+             \tmap<{},{}> data = 1;\n\
+            }}\n\
+            {}",
+            msg_name,
+            &valid_front_types[0].to_lowercase(),
+            msg_name,
+            msg_schema
+        );
+
+        let content = format!(
+            "syntax = \"proto3\";\n\
+            package pbd;\n\
+            \n\
+            {}",
+            out
+        );
+        let path_str = format!("{}/{}.proto", out_path, msg_name);
+        self.write_file(&path_str, &content);
+        GLOBAL_PBD.write().push(out);
+
+        // builder bin data
+        let mut builder = prost_reflect_build::Builder::new();
+        let bin_path = format!("{}/{}.bin", out_path, msg_name);
+        builder.file_descriptor_set_path(&bin_path);
+        env::set_var("OUT_DIR", out_path);
+        builder.compile_protos(&[&path_str], &["."]).unwrap();
+        // new  messagedescriptor
+        let bytes = fs::read(&bin_path).unwrap();
+        let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
+        let n1 = format!("pbd.{}Info", msg_name);
+        let n2 = format!("pbd.{}", msg_name);
+        let info_des = pool.get_message_by_name(&n1).unwrap();
+        let mut info_dm = DynamicMessage::new(info_des);
+        let msg_des = pool.get_message_by_name(&n2).unwrap();
+        let mut data: HashMap<MapKey, PValue> = HashMap::new();
+        let mut row = 1;
+        for x in 0..self.values.len() {
+            let mut dm = DynamicMessage::new(msg_des.clone());
+            for y in 0..valid_columns.len() {
+                let i = valid_columns[y];
+                let ft = &valid_front_types[y];
+                let fk = &self.names[i];
+                let fv = self.values[x][i];
+                let enu_val = &fv.to_string().trim().to_string();
+                if ft == "ENUM" {
+                    if let Some(x) = self.enums[i].get(enu_val) {
+                        dm.set_field_by_name(fk, PValue::U32(*x as u32));
+                    } else {
+                        error!(
+                            "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {:?} 中",
+                            fk,
+                            &self.values[x][1],
+                            enu_val,
+                            &self.enums[i].keys()
+                        );
+                    }
+                } else {
+                    let fr = &self.refs[i];
+                    if !fr.is_empty() {
+                        let new_ft = GLOBAL_FRONT_PRIMARYS.read().get(fr).unwrap().to_string();
+                        let p_val = cell_to_pvalue(fv, &new_ft, &self.mod_name, fk);
+                        dm.set_field_by_name(fk, p_val);
+                    } else {
+                        let p_val = cell_to_pvalue(fv, &ft.to_string(), &self.mod_name, fk);
+                        dm.set_field_by_name(fk, p_val);
+                    };
+                    // println!("ft: {},fk: {},fv: {:?},p_val: {:?}", ft, fk, fv, p_val);
+                }
+            }
+            let key_val = dm.get_field_by_name_mut(key_name).unwrap().clone();
+            let dy_msg = PValue::Message(dm);
+            match key_val {
+                PValue::I32(ref s) => data.insert(MapKey::I32(*s), dy_msg),
+                PValue::I64(ref s) => data.insert(MapKey::I64(*s), dy_msg),
+                PValue::U32(ref s) => data.insert(MapKey::U32(*s), dy_msg),
+                PValue::U64(ref s) => data.insert(MapKey::U64(*s), dy_msg),
+                PValue::String(ref s) => data.insert(MapKey::String(s.to_string()), dy_msg),
+                _ => {
+                    error!("键值的数据类型不对! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Key: {}\n", &self.input_file_name,&self.sheet_name,&self.mod_name,row,key_name);
+                    panic!("abort");
+                }
+            };
+            row = row + 1;
+        }
+        info_dm.set_field_by_name("data", PValue::Map(data));
+        let mut buf = vec![];
+        info_dm.encode(&mut buf).unwrap();
+        let out_pbd_path = format!("{}/{}.pbd", out_path, msg_name);
+        fs::write(out_pbd_path, buf).unwrap();
+    }
 }
 
 pub fn xls_to_file(input_file_name: String, dst_path: String, format: String) {
@@ -296,6 +493,26 @@ pub fn build_id(input_file_name: String) {
                     } else {
                         GLOBAL_IDS.write().insert(key);
                     }
+                } else if st == "BACK_TYPE" {
+                    for i in 1..row.len() {
+                        let rv = row[i].clone().to_string().trim().to_uppercase();
+                        if !rv.is_empty() {
+                            GLOBAL_BACK_PRIMARYS
+                                .write()
+                                .insert(mod_name.to_string(), rv);
+                            break;
+                        }
+                    }
+                } else if st == "FRONT_TYPE" {
+                    for i in 1..row.len() {
+                        let rv = row[i].clone().to_string().trim().to_uppercase();
+                        if !rv.is_empty() {
+                            GLOBAL_FRONT_PRIMARYS
+                                .write()
+                                .insert(mod_name.to_string(), rv);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -314,6 +531,7 @@ pub fn sheet_to_data<'a>(
     let mut front_types: Vec<String> = vec![];
     let mut back_types: Vec<String> = vec![];
     let mut refs: Vec<String> = vec![];
+    let mut describes: Vec<String> = vec![];
     let mut enums: Vec<AHashMap<String, usize>> = vec![];
     let mut row_num: usize = 0;
     for row in sheet.rows() {
@@ -343,6 +561,10 @@ pub fn sheet_to_data<'a>(
             for v in row {
                 let mod_name = v.to_string().trim().to_string();
                 refs.push(mod_name);
+            }
+        } else if st == "DES" {
+            for v in row {
+                describes.push(v.to_string().trim().to_string());
             }
         } else if st == "ENUM" {
             for v in row {
@@ -402,7 +624,6 @@ pub fn sheet_to_data<'a>(
             values.push(row_value);
         }
     }
-
     let info: SheetData = SheetData {
         input_file_name: input_file_name,
         output_file_name: output_file_name,
@@ -413,16 +634,48 @@ pub fn sheet_to_data<'a>(
         back_types: back_types,
         values: values,
         refs: refs,
+        describes: describes,
         enums: enums,
     };
     return info;
 }
 
+pub fn create_pbd_file(out_path: &String) {
+    let content = format!(
+        "syntax = \"proto3\";\n\
+        package pbd;\n\
+        \n\
+        {}",
+        GLOBAL_PBD.read().join("\n\n")
+    );
+
+    let objects = fs::read_dir(out_path).unwrap();
+
+    for obj in objects {
+        let path = obj.unwrap().path();
+        let temp_path = path.display().to_string();
+        if temp_path.ends_with(".bin")
+            || temp_path.ends_with(".rs")
+            || temp_path.ends_with(".proto")
+        {
+            fs::remove_file(path).ok();
+        }
+    }
+    let pbd_path = format!("{}/pbd.proto", out_path);
+    fs::write(&pbd_path, content).unwrap();
+
+    Command::new("protoc")
+        .arg(&pbd_path)
+        .arg(format!("--csharp_out={}", out_path))
+        .output()
+        .expect("failed to execute process");
+}
+
 fn cell_to_json(cell: &DataType, row_type: &String, filename: &String, key: &String) -> Value {
     match cell {
-        &DataType::Float(f) if row_type == "INT" => json!(f as i64),
+        &DataType::Float(f) if row_type.contains("INT") => json!(f as i64),
 
-        &DataType::String(ref s) if row_type == "INT" => match s.parse::<i64>() {
+        &DataType::String(ref s) if row_type.contains("INT") => match s.parse::<i64>() {
             Ok(x) => json!(x),
             Err(e) => {
                 error!("ParseError:{:?}, {}, {:?}", e, filename, cell);
@@ -433,7 +686,7 @@ fn cell_to_json(cell: &DataType, row_type: &String, filename: &String, key: &Str
             .parse::<f64>()
             .ok()
             .expect(parse_err(filename, key, s).as_str())),
-        &DataType::String(ref s) if row_type == "INT" => json!(s
+        &DataType::String(ref s) if row_type.contains("INT") => json!(s
             .parse::<i64>()
             .ok()
             .expect(parse_err(filename, key, s).as_str())),
@@ -464,7 +717,7 @@ fn cell_to_json(cell: &DataType, row_type: &String, filename: &String, key: &Str
             json!(data)
         }
         &DataType::DateTime(x) => json!(x),
-        &DataType::Empty if row_type == "FLOAT" || row_type == "INT" => json!(0),
+        &DataType::Empty if row_type == "FLOAT" || row_type.contains("INT") => json!(0),
         &DataType::Empty if row_type == "STRING" => json!(""),
         &DataType::String(ref s) => json!(s),
         &DataType::Bool(b) => json!(b),
@@ -477,9 +730,9 @@ fn cell_to_json(cell: &DataType, row_type: &String, filename: &String, key: &Str
 
 fn cell_to_string(cell: &DataType, row_type: &String, filename: &String, key: &String) -> String {
     match cell {
-        &DataType::Float(f) if row_type == "INT" => json!(f as i64).to_string(),
+        &DataType::Float(f) if row_type.contains("INT") => json!(f as i64).to_string(),
 
-        &DataType::String(ref s) if row_type == "INT" => match s.parse::<i64>() {
+        &DataType::String(ref s) if row_type.contains("INT") => match s.parse::<i64>() {
             Ok(x) => json!(x).to_string(),
             Err(_) => {
                 error!("{},{:?}", filename, cell);
@@ -491,7 +744,7 @@ fn cell_to_string(cell: &DataType, row_type: &String, filename: &String, key: &S
             .ok()
             .expect(parse_err(filename, key, s).as_str()))
         .to_string(),
-        &DataType::String(ref s) if row_type == "INT" => json!(s
+        &DataType::String(ref s) if row_type.contains("INT") => json!(s
             .parse::<i64>()
             .ok()
             .expect(parse_err(filename, key, s).as_str()))
@@ -525,7 +778,7 @@ fn cell_to_string(cell: &DataType, row_type: &String, filename: &String, key: &S
             json!(data).to_string()
         }
         &DataType::DateTime(x) => json!(x).to_string(),
-        &DataType::Empty if row_type == "FLOAT" || row_type == "INT" => json!(0).to_string(),
+        &DataType::Empty if row_type == "FLOAT" || row_type.contains("INT") => json!(0).to_string(),
         &DataType::Empty if row_type == "STRING" => json!("").to_string(),
         &DataType::String(ref s) => json!(s).to_string(),
         &DataType::Bool(b) => json!(b).to_string(),
@@ -533,6 +786,113 @@ fn cell_to_string(cell: &DataType, row_type: &String, filename: &String, key: &S
         &DataType::Int(i) => json!(i).to_string(),
         &DataType::Empty => "nil".to_string(),
         &DataType::Error(_) => "nil".to_string(),
+    }
+}
+
+fn cell_to_pvalue(cell: &DataType, row_type: &String, filename: &String, key: &String) -> PValue {
+    match cell {
+        // INT32
+        &DataType::Int(ref s) if row_type == "INT32" => PValue::I32(*s as i32),
+        &DataType::Float(f) if row_type == "INT32" => PValue::I32(f as i32),
+        &DataType::String(ref s) if row_type == "INT32" => PValue::I32(
+            s.parse::<i32>()
+                .ok()
+                .expect(parse_err(filename, key, s).as_str()),
+        ),
+
+        // INT64
+        &DataType::Int(ref s) if row_type == "INT64" || row_type == "INT" => PValue::I64(*s),
+        &DataType::Float(f) if row_type == "INT64" || row_type == "INT" => PValue::I64(f as i64),
+        &DataType::String(ref s) if row_type == "INT64" || row_type == "INT" => PValue::I64(
+            s.parse::<i64>()
+                .ok()
+                .expect(parse_err(filename, key, s).as_str()),
+        ),
+
+        // UINT32
+        &DataType::Int(ref s) if row_type == "UINT32" => PValue::U32(*s as u32),
+        &DataType::Float(f) if row_type == "UINT32" => PValue::U32(f as u32),
+        &DataType::String(ref s) if row_type == "UINT32" => PValue::U32(
+            s.parse::<u32>()
+                .ok()
+                .expect(parse_err(filename, key, s).as_str()),
+        ),
+
+        // UINT64
+        &DataType::Int(ref s) if row_type == "UINT64" => PValue::U64(*s as u64),
+        &DataType::Float(f) if row_type == "UINT64" => PValue::U64(f as u64),
+        &DataType::String(ref s) if row_type == "UINT64" => PValue::U64(
+            s.parse::<u64>()
+                .ok()
+                .expect(parse_err(filename, key, s).as_str()),
+        ),
+
+        // FLOAT
+        &DataType::Int(ref s) if row_type == "FLOAT" => PValue::F64(*s as f64),
+        &DataType::Float(ref s) if row_type == "FLOAT" => PValue::F64(*s),
+        &DataType::String(ref s) if row_type == "FLOAT" => PValue::F64(
+            s.parse::<f64>()
+                .ok()
+                .expect(parse_err(filename, key, s).as_str()),
+        ),
+
+        // STRING
+        &DataType::Int(ref s) if row_type == "STRING" => PValue::String(s.to_string()),
+        &DataType::Float(ref s) if row_type == "STRING" => PValue::String(s.to_string()),
+        &DataType::String(ref s) if row_type == "STRING" => PValue::String(s.to_string()),
+
+        // LIST
+        &DataType::Empty if row_type.contains("LIST") => PValue::List([].to_vec()),
+        &DataType::Int(f) if row_type == "LIST,INT64" => PValue::List(vec![PValue::I64(f)]),
+        &DataType::Float(f) if row_type == "LIST,FLOAT" => PValue::List(vec![PValue::F64(f)]),
+        &DataType::String(ref s) if row_type == "LIST,STRING" => {
+            let list: Vec<&str> = s.split(',').collect();
+            let mut result: Vec<PValue> = vec![];
+            for i in 0..list.len() {
+                result.push(PValue::String(list[i].to_string()))
+            }
+            PValue::List(result)
+        }
+        &DataType::String(ref s) if row_type == "LIST,FLOAT" => {
+            let list: Vec<&str> = s.split(',').collect();
+            let mut result: Vec<PValue> = vec![];
+            for i in 0..list.len() {
+                result.push(PValue::F64(
+                    list[i]
+                        .parse::<f64>()
+                        .ok()
+                        .expect(parse_err(filename, key, s).as_str()),
+                ))
+            }
+            PValue::List(result)
+        }
+        &DataType::String(ref s) if row_type == "LIST,INT64" => {
+            let list: Vec<&str> = s.split(',').collect();
+            let mut result: Vec<PValue> = vec![];
+            for i in 0..list.len() {
+                result.push(PValue::I64(
+                    list[i]
+                        .parse::<i64>()
+                        .ok()
+                        .expect(parse_err(filename, key, s).as_str()),
+                ))
+            }
+            PValue::List(result)
+        }
+
+        &DataType::DateTime(x) => PValue::String(x.to_string()),
+        &DataType::Empty if row_type == "INT32" => PValue::I32(0),
+        &DataType::Empty if row_type == "INT64" || row_type == "INT" => PValue::I64(0),
+        &DataType::Empty if row_type == "UINT32" => PValue::U32(0),
+        &DataType::Empty if row_type == "UINT64" => PValue::U64(0),
+        &DataType::Empty if row_type == "FLOAT" => PValue::F64(0.0),
+        &DataType::Empty if row_type == "STRING" => PValue::String("".to_string()),
+        &DataType::String(ref s) => PValue::String(s.to_string()),
+        &DataType::Bool(b) => PValue::Bool(b),
+        &DataType::Float(f) => PValue::F64(f),
+        &DataType::Int(i) => PValue::I64(i),
+        &DataType::Empty => PValue::String("".to_string()),
+        &DataType::Error(_) => PValue::String("".to_string()),
     }
 }
 
@@ -553,4 +913,26 @@ fn get_module_name(fname: String) -> String {
         .to_train_case()
         .replace("-", ".");
     return a;
+}
+
+fn get_real_front_type(mod_name: &String, old_type: &String) -> String {
+    if mod_name.trim().is_empty() {
+        return old_type.to_string();
+    }
+    if let Some(x) = GLOBAL_FRONT_PRIMARYS.read().get(mod_name) {
+        return x.to_string();
+    } else {
+        return old_type.to_string();
+    }
+}
+
+fn get_real_back_type(mod_name: &String, old_type: &String) -> String {
+    if mod_name.trim().is_empty() {
+        return old_type.to_string();
+    }
+    if let Some(x) = GLOBAL_BACK_PRIMARYS.read().get(mod_name) {
+        return x.to_string();
+    } else {
+        return old_type.to_string();
+    }
 }

@@ -9,6 +9,9 @@ extern crate inflector;
 extern crate log;
 
 extern crate num_cpus;
+extern crate prost;
+extern crate prost_reflect;
+extern crate regex;
 extern crate serde;
 extern crate static_init;
 extern crate threads_pool;
@@ -34,7 +37,7 @@ struct Args {
     ///导出目录
     #[clap(short, long, value_parser, default_value = "./")]
     output_path: String,
-    ///导出格式 NONE | JSON | LUA | EX | CS
+    ///导出格式 NONE | JSON | LUA | EX | CS | PBD
     #[clap(short, long, value_parser, default_value = "NONE")]
     format: String,
 }
@@ -53,9 +56,14 @@ fn main() {
 
 fn all_files(path_str: &str, exts: Vec<String>) -> Vec<String> {
     let mut res: Vec<String> = vec![];
+
     let objects = fs::read_dir(path_str).unwrap();
     for obj in objects {
         let path = obj.unwrap().path();
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        if file_name.starts_with("~$") {
+            continue;
+        }
         match path.extension() {
             Some(x) if exts.iter().any(|e| e.as_str() == x) => {
                 let p_str = format!("{}", path.display());
@@ -105,6 +113,9 @@ fn gen_from_excel(args: Args) {
     }
     for _ in 0..xls_files.len() {
         rc.recv().unwrap();
+    }
+    if args.type_input.to_uppercase() == "EXCEL" && args.format.to_uppercase() == "PBD" {
+        excel::create_pbd_file(&args.output_path);
     }
 
     pool.clear();
