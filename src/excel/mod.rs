@@ -348,13 +348,13 @@ impl<'a> SheetData<'_> {
             field_schemas.join("\n")
         );
         let key_name = &self.names[valid_columns[0]];
-        if !valid_front_types[0].contains("INT") && valid_front_types[0] != "ENUM" {
-            error!(
-                "主键仅支持整型类型!请确定字段[{}]是否为该表主键  File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
-                key_name, &self.input_file_name, &self.sheet_name, &self.mod_name, key_name, valid_front_types[0]
-            );
-            panic!("abort");
-        }
+        // if !valid_front_types[0].contains("INT") && valid_front_types[0] != "ENUM" {
+        //     error!(
+        //         "主键仅支持整型类型!请确定字段[{}]是否为该表主键  File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
+        //         key_name, &self.input_file_name, &self.sheet_name, &self.mod_name, key_name, valid_front_types[0]
+        //     );
+        //     panic!("abort");
+        // }
         let mut map_key_type = valid_front_types[0].to_string();
         if map_key_type == "ENUM" {
             map_key_type = "UINT32".to_string();
