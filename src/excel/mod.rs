@@ -11,7 +11,6 @@ use static_init::dynamic;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::process::Command;
 use std::string::String;
 use std::{env, fs};
 #[dynamic]
@@ -24,7 +23,7 @@ static mut GLOBAL_FRONT_PRIMARYS: AHashMap<String, String> = AHashMap::new();
 static mut GLOBAL_BACK_PRIMARYS: AHashMap<String, String> = AHashMap::new();
 
 #[dynamic]
-static mut GLOBAL_PBD: Vec<String> = Vec::new();
+static mut GLOBAL_PBD: AHashMap<String, String> = AHashMap::new();
 
 // static mut
 pub struct SheetData<'a> {
@@ -386,7 +385,7 @@ impl<'a> SheetData<'_> {
         );
         let path_str = format!("{}/tmp_{}.proto", out_path, msg_name.to_lowercase());
         self.write_file(&path_str, &content);
-        GLOBAL_PBD.write().push(out);
+        GLOBAL_PBD.write().insert(msg_name.to_string(), out);
 
         // builder bin data
         let mut builder = prost_reflect_build::Builder::new();
@@ -449,7 +448,7 @@ impl<'a> SheetData<'_> {
         info_dm.set_field_by_name("data", PValue::Map(data));
         let mut buf = vec![];
         info_dm.encode(&mut buf).unwrap();
-        let out_pbd_path = format!("{}/data_{}.pbd", out_path, msg_name.to_lowercase());
+        let out_pbd_path = format!("{}/data_{}.bytes", out_path, msg_name.to_lowercase());
         fs::write(out_pbd_path, buf).unwrap();
     }
 }
@@ -653,12 +652,23 @@ pub fn sheet_to_data<'a>(
 }
 
 pub fn create_pbd_file(out_path: &String) {
+    let pbds = GLOBAL_PBD.read();
+    let keys = pbds.keys();
+    let mut sorted_keys: Vec<String> = vec![];
+    let mut contents: Vec<String> = vec![];
+    for key in keys {
+        sorted_keys.push(key.to_string());
+    }
+    sorted_keys.sort();
+    for k in sorted_keys {
+        contents.push(pbds.get(&k).unwrap().to_string());
+    }
     let content = format!(
         "syntax = \"proto3\";\n\
         package pbd;\n\
         \n\
         {}",
-        GLOBAL_PBD.read().join("\n\n")
+        contents.join("\n\n")
     );
 
     let objects = fs::read_dir(out_path).unwrap();
@@ -675,12 +685,6 @@ pub fn create_pbd_file(out_path: &String) {
     }
     let pbd_path = format!("{}/pbd.proto", out_path);
     fs::write(&pbd_path, content).unwrap();
-
-    Command::new("protoc")
-        .arg(&pbd_path)
-        .arg(format!("--csharp_out={}", out_path))
-        .output()
-        .expect("failed to execute process");
 }
 
 fn cell_to_json(
@@ -877,6 +881,8 @@ fn cell_to_pvalue(
             result.push(PValue::String(list[i].to_string()))
         }
         return PValue::List(result);
+    } else if row_type == "STRING" {
+        return PValue::String(s);
     } else {
         warn!(
             "cell_to_pvalue failed,unsupport front_type [{}]! File: [{}] Key: [{}] Val: [{}]",
