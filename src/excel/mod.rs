@@ -366,7 +366,7 @@ impl<'a> SheetData<'_> {
             map_key_type = "UINT32".to_string();
         }
         let out = format!(
-            "message {}Info{{\n\
+            "message Data{}{{\n\
              \tmap<{},{}> data = 1;\n\
             }}\n\
             {}",
@@ -396,7 +396,7 @@ impl<'a> SheetData<'_> {
         // new  messagedescriptor
         let bytes = fs::read(&bin_path).unwrap();
         let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
-        let n1 = format!("pbd.{}Info", msg_name);
+        let n1 = format!("pbd.Data{}", msg_name);
         let n2 = format!("pbd.{}", msg_name);
         let info_des = pool.get_message_by_name(&n1).unwrap();
         let mut info_dm = DynamicMessage::new(info_des);
@@ -453,9 +453,13 @@ impl<'a> SheetData<'_> {
     }
 }
 
-pub fn xls_to_file(input_file_name: String, dst_path: String, format: String) {
+pub fn xls_to_file(input_file_name: String, dst_path: String, format: String, sheets_enable: bool) {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
-    let sheets = excel.sheet_names().to_owned();
+    let mut sheets = excel.sheet_names().to_owned();
+
+    if !sheets_enable {
+        sheets = vec![excel.sheet_names()[0].to_string()];
+    }
     for sheet in sheets {
         info!("LOADING [{}] [{}] ...", input_file_name, sheet);
         if let Some(Ok(r)) = excel.worksheet_range(&sheet) {
@@ -465,9 +469,13 @@ pub fn xls_to_file(input_file_name: String, dst_path: String, format: String) {
     }
 }
 
-pub fn build_id(input_file_name: String) {
+pub fn build_id(input_file_name: String, sheets_enable: bool) {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
-    for sheet in excel.sheet_names().to_owned() {
+    let mut sheets = excel.sheet_names().to_owned();
+    if !sheets_enable {
+        sheets = vec![excel.sheet_names()[0].to_string()];
+    }
+    for sheet in sheets {
         if let Some(Ok(r)) = excel.worksheet_range(&sheet) {
             let mut mod_name: String = String::new();
             let mut row_num = 0;
