@@ -40,6 +40,9 @@ struct Args {
     ///导出格式 NONE | JSON | LUA | EX | CS | PBD
     #[clap(short, long, value_parser, default_value = "NONE")]
     format: String,
+    //是否允许多sheets导出 TRUE|FALSE
+    #[clap(short, long, value_parser, default_value = "FALSE")]
+    sheets_enable: String,
 }
 
 fn main() {
@@ -89,8 +92,9 @@ fn gen_from_excel(args: Args) {
     for file in &xls_files {
         let file1 = file.clone();
         let tx = tx.clone();
+        let sheets_enable = args.sheets_enable.clone().to_uppercase() == "TRUE";
         pool.execute(move || {
-            excel::build_id(file1);
+            excel::build_id(file1, sheets_enable);
             tx.send(()).unwrap();
         })
         .ok();
@@ -105,8 +109,9 @@ fn gen_from_excel(args: Args) {
         let tx = tx.clone();
         let dst_path = args.output_path.clone();
         let format = args.format.clone();
+        let sheets_enable = args.sheets_enable.clone().to_uppercase() == "TRUE";
         pool.execute(move || {
-            excel::xls_to_file(file1, dst_path, format);
+            excel::xls_to_file(file1, dst_path, format, sheets_enable);
             tx.send(()).unwrap();
         })
         .ok();
