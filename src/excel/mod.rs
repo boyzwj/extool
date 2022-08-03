@@ -116,12 +116,10 @@ impl<'a> SheetData<'_> {
 
             if map.len() > 0 {
                 let key_is_enum = self.enums[1].is_empty() == false;
-                let mut keyvalue = String::new();
                 let enum_value = rv[1].to_string().trim().to_string();
+                let mut keyvalue = enum_value.to_string();
                 if key_is_enum {
                     keyvalue = self.enums[1].get(&enum_value).unwrap().to_string();
-                } else {
-                    keyvalue = enum_value.to_string();
                 }
 
                 res.insert(keyvalue, json!(map));
@@ -179,17 +177,15 @@ impl<'a> SheetData<'_> {
             }
             if columns.len() > 0 {
                 let key_is_enum = self.enums[1].is_empty() == false;
-                let mut keyvalue = String::new();
+                let mut keyvalue = cell_to_string(
+                    &rv[1],
+                    &self.front_types[1],
+                    &self.output_file_name,
+                    &self.names[1],
+                );
                 if key_is_enum {
                     let enum_value = &rv[1].to_string().trim().to_string();
                     keyvalue = self.enums[1].get(enum_value).unwrap().to_string();
-                } else {
-                    keyvalue = cell_to_string(
-                        &rv[1],
-                        &self.front_types[1],
-                        &self.output_file_name,
-                        &self.names[1],
-                    );
                 }
 
                 res.push(format!("\t[{}] = {{{}}}", keyvalue, columns.join(",")));
@@ -262,17 +258,15 @@ impl<'a> SheetData<'_> {
             }
             if columns.len() > 0 {
                 let key_is_enum = self.enums[1].is_empty() == false;
-                let mut keyvalue = String::new();
+                let mut keyvalue = cell_to_string(
+                    &rv[1],
+                    &self.back_types[1],
+                    &self.output_file_name,
+                    &self.names[1],
+                );
                 if key_is_enum {
                     let enum_value = &rv[1].to_string().trim().to_string();
                     keyvalue = self.enums[1].get(enum_value).unwrap().to_string();
-                } else {
-                    keyvalue = cell_to_string(
-                        &rv[1],
-                        &self.back_types[1],
-                        &self.output_file_name,
-                        &self.names[1],
-                    );
                 }
 
                 res.push(format!(
