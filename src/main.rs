@@ -43,9 +43,9 @@ struct Args {
     ///是否允许多sheets导出 TRUE|FALSE
     #[clap(short, long, value_parser, default_value = "FALSE")]
     multi_sheets: String,
-    ///导出类型 FRONT|BACK|BOTH
+    ///导出的列 FRONT|BACK|BOTH
     #[clap(short, long, value_parser, default_value = "FRONT")]
-    class: String,
+    export_columns: String,
 }
 
 fn main() {
@@ -113,9 +113,9 @@ fn gen_from_excel(args: Args) {
         let dst_path = args.output_path.clone();
         let format = args.format.clone();
         let multi_sheets = args.multi_sheets.clone().to_uppercase() == "TRUE";
-        let class = args.class.clone().to_uppercase();
+        let export_columns = args.export_columns.clone().to_uppercase();
         pool.execute(move || {
-            excel::xls_to_file(file1, dst_path, format, multi_sheets, class);
+            excel::xls_to_file(file1, dst_path, format, multi_sheets, export_columns);
             tx.send(()).unwrap();
         })
         .ok();
