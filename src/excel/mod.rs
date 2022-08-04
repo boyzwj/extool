@@ -33,8 +33,7 @@ pub struct SheetData<'a> {
     mod_name: String,
     names: Vec<String>,
     refs: Vec<String>,
-    front_types: Vec<String>,
-    back_types: Vec<String>,
+    types: Vec<String>,
     describes: Vec<String>,
     enums: Vec<AHashMap<String, usize>>,
     values: Vec<Vec<&'a DataType>>,
@@ -82,10 +81,10 @@ impl<'a> SheetData<'_> {
         let mut res: Map<String, Value> = Map::new();
         for rv in &self.values {
             let mut map: Map<String, Value> = Map::new();
-            for i in 1..self.front_types.len() {
-                if self.front_types[i] != "" {
+            for i in 1..self.types.len() {
+                if self.types[i] != "" {
                     let column_name = &self.names[i];
-                    let origin_type = &self.front_types[i];
+                    let origin_type = &self.types[i];
                     let ref_name = &self.refs[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
                         let real_type = &get_real_front_type(ref_name, origin_type, false);
@@ -139,8 +138,8 @@ impl<'a> SheetData<'_> {
         let mut res: Vec<String> = vec![];
         let mut kns: Vec<String> = vec![];
         let mut j = 1;
-        for i in 1..self.front_types.len() {
-            if self.front_types[i] != "" {
+        for i in 1..self.types.len() {
+            if self.types[i] != "" {
                 let column_name = &self.names[i];
                 kns.push(format!("{} = {}", column_name, j.to_string()));
                 j = j + 1;
@@ -148,10 +147,10 @@ impl<'a> SheetData<'_> {
         }
         for rv in &self.values {
             let mut columns: Vec<String> = vec![];
-            for i in 1..self.front_types.len() {
-                if self.front_types[i] != "" {
+            for i in 1..self.types.len() {
+                if self.types[i] != "" {
                     let column_name = &self.names[i];
-                    let origin_type = &self.front_types[i];
+                    let origin_type = &self.types[i];
                     // let dic = &self.enums[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
                         let real_type = &get_real_front_type(&self.refs[i], origin_type, false);
@@ -179,7 +178,7 @@ impl<'a> SheetData<'_> {
                 let key_is_enum = self.enums[1].is_empty() == false;
                 let mut keyvalue = cell_to_string(
                     &rv[1],
-                    &self.front_types[1],
+                    &self.types[1],
                     &self.output_file_name,
                     &self.names[1],
                 );
@@ -229,10 +228,10 @@ impl<'a> SheetData<'_> {
         let mut ids: Vec<String> = vec![];
         for rv in &self.values {
             let mut columns: Vec<String> = vec![];
-            for i in 1..self.back_types.len() {
-                if self.back_types[i] != "" {
+            for i in 1..self.types.len() {
+                if self.types[i] != "" {
                     let column_name = &self.names[i];
-                    let origin_type = &self.back_types[i];
+                    let origin_type = &self.types[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
                         let real_type = &get_real_back_type(&self.refs[i], origin_type, false);
 
@@ -260,7 +259,7 @@ impl<'a> SheetData<'_> {
                 let key_is_enum = self.enums[1].is_empty() == false;
                 let mut keyvalue = cell_to_string(
                     &rv[1],
-                    &self.back_types[1],
+                    &self.types[1],
                     &self.output_file_name,
                     &self.names[1],
                 );
@@ -313,8 +312,8 @@ impl<'a> SheetData<'_> {
         let mut n = 1;
         let mut valid_columns: Vec<usize> = vec![];
         let mut valid_front_types: Vec<String> = vec![];
-        for i in 1..self.front_types.len() {
-            let origin_type = &self.front_types[i];
+        for i in 1..self.types.len() {
+            let origin_type = &self.types[i];
             let fk = &self.names[i];
             let des = &self.describes[i];
             let is_enum = self.enums[i].is_empty() == false;
@@ -447,26 +446,32 @@ impl<'a> SheetData<'_> {
     }
 }
 
-pub fn xls_to_file(input_file_name: String, dst_path: String, format: String, sheets_enable: bool) {
+pub fn xls_to_file(
+    input_file_name: String,
+    dst_path: String,
+    format: String,
+    multi_sheets: bool,
+    class: String,
+) {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
     let mut sheets = excel.sheet_names().to_owned();
 
-    if !sheets_enable {
+    if !multi_sheets {
         sheets = vec![excel.sheet_names()[0].to_string()];
     }
     for sheet in sheets {
         info!("LOADING [{}] [{}] ...", input_file_name, sheet);
         if let Some(Ok(r)) = excel.worksheet_range(&sheet) {
-            let data = sheet_to_data(input_file_name.clone(), &sheet, &r);
+            let data = sheet_to_data(input_file_name.clone(), &sheet, &r, class.to_string());
             data.export(&format, &dst_path);
         }
     }
 }
 
-pub fn build_id(input_file_name: String, sheets_enable: bool) {
+pub fn build_id(input_file_name: String, multi_sheets: bool) {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
     let mut sheets = excel.sheet_names().to_owned();
-    if !sheets_enable {
+    if !multi_sheets {
         sheets = vec![excel.sheet_names()[0].to_string()];
     }
     for sheet in sheets {
@@ -537,6 +542,7 @@ pub fn sheet_to_data<'a>(
     input_file_name: String,
     sheet_name: &'a String,
     sheet: &'a Range<DataType>,
+    class: String,
 ) -> SheetData<'a> {
     let mut output_file_name: String = String::new();
     let mut mod_name: String = String::new();
@@ -638,14 +644,31 @@ pub fn sheet_to_data<'a>(
             values.push(row_value);
         }
     }
+
+    let mut types: Vec<String> = front_types;
+
+    if class == "BOTH" {
+        let mut temp_types: Vec<String> = vec!["BOTH".to_string()];
+        for n in 1..types.len() {
+            let front_type = types[n].trim();
+            if front_type.is_empty() {
+                temp_types.push(back_types[n].trim().to_string());
+            } else {
+                temp_types.push(front_type.to_string());
+            }
+        }
+        types = temp_types;
+    } else if class == "BACK" {
+        types = back_types;
+    }
+
     let info: SheetData = SheetData {
         input_file_name: input_file_name,
         output_file_name: output_file_name,
         sheet_name: sheet_name,
         mod_name: mod_name,
         names: names,
-        front_types: front_types,
-        back_types: back_types,
+        types: types,
         values: values,
         refs: refs,
         describes: describes,
