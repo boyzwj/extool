@@ -451,7 +451,7 @@ pub fn xls_to_file(
     dst_path: String,
     format: String,
     multi_sheets: bool,
-    class: String,
+    export_columns: String,
 ) {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
     let mut sheets = excel.sheet_names().to_owned();
@@ -462,7 +462,12 @@ pub fn xls_to_file(
     for sheet in sheets {
         info!("LOADING [{}] [{}] ...", input_file_name, sheet);
         if let Some(Ok(r)) = excel.worksheet_range(&sheet) {
-            let data = sheet_to_data(input_file_name.clone(), &sheet, &r, class.to_string());
+            let data = sheet_to_data(
+                input_file_name.clone(),
+                &sheet,
+                &r,
+                export_columns.to_string(),
+            );
             data.export(&format, &dst_path);
         }
     }
@@ -542,7 +547,7 @@ pub fn sheet_to_data<'a>(
     input_file_name: String,
     sheet_name: &'a String,
     sheet: &'a Range<DataType>,
-    class: String,
+    export_columns: String,
 ) -> SheetData<'a> {
     let mut output_file_name: String = String::new();
     let mut mod_name: String = String::new();
@@ -647,7 +652,7 @@ pub fn sheet_to_data<'a>(
 
     let mut types: Vec<String> = front_types;
 
-    if class == "BOTH" {
+    if export_columns == "BOTH" {
         let mut temp_types: Vec<String> = vec!["BOTH".to_string()];
         for n in 1..types.len() {
             let front_type = types[n].trim();
@@ -658,7 +663,7 @@ pub fn sheet_to_data<'a>(
             }
         }
         types = temp_types;
-    } else if class == "BACK" {
+    } else if export_columns == "BACK" {
         types = back_types;
     }
 
