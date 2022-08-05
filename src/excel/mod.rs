@@ -13,6 +13,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::string::String;
 use std::{env, fs};
+use xlsxwriter::Workbook;
+
 #[dynamic]
 static mut GLOBAL_IDS: AHashSet<String> = AHashSet::new();
 
@@ -24,6 +26,9 @@ static mut GLOBAL_BACK_PRIMARYS: AHashMap<String, String> = AHashMap::new();
 
 #[dynamic]
 static mut GLOBAL_PBD: AHashMap<String, String> = AHashMap::new();
+
+#[dynamic]
+static mut GLOBAL_LANG: AHashMap<String, String> = AHashMap::new();
 
 // static mut
 pub struct SheetData<'a> {
@@ -50,6 +55,8 @@ impl<'a> SheetData<'_> {
             self.data_to_ex(&dst_path);
         } else if temp == "PBD" {
             self.data_to_pbd(&dst_path);
+        } else if temp == "LANG" {
+            self.data_to_lang(&dst_path);
         }
     }
 
@@ -444,6 +451,24 @@ impl<'a> SheetData<'_> {
         let out_pbd_path = format!("{}/data_{}.bytes", out_path, msg_name.to_lowercase());
         fs::write(out_pbd_path, buf).unwrap();
     }
+    pub fn data_to_lang(&self, _out_path: &String) {
+        for i in 1..self.types.len() {
+            if &self.types[i] == "STRING_LOC" {
+                let lang_field_name = format!("{}_local", self.names[i].trim());
+                let lang_field_index = self
+                    .names
+                    .iter()
+                    .position(|r| r == &lang_field_name)
+                    .unwrap();
+                for rows in &self.values {
+                    let lang_key = rows[i].to_string();
+                    let lang_val = rows[lang_field_index].to_string();
+
+                    GLOBAL_LANG.write().insert(lang_key, lang_val);
+                }
+            }
+        }
+    }
 }
 
 pub fn xls_to_file(
@@ -716,6 +741,73 @@ pub fn create_pbd_file(out_path: &String) {
     }
     let pbd_path = format!("{}/pbd.proto", out_path);
     fs::write(&pbd_path, content).unwrap();
+}
+
+pub fn create_lang_file(out_path: &String) -> Result<(), xlsxwriter::XlsxError> {
+    let workbook = Workbook::new(format!("{out_path}/D多语言Key表.xlsx").as_str());
+    let mut sheet1 = workbook.add_worksheet(None)?;
+    sheet1.write_string(0, 0, "Mod", None)?;
+    sheet1.write_string(0, 1, "Data.LanguageKey", None)?;
+    sheet1.write_string(1, 0, "BACK_TYPE", None)?;
+    sheet1.write_string(2, 0, "FRONT_TYPE", None)?;
+    sheet1.write_string(2, 1, "uint32", None)?;
+    sheet1.write_string(2, 2, "string", None)?;
+    sheet1.write_string(3, 0, "DES", None)?;
+    sheet1.write_string(3, 1, "文本Key的Hash截取", None)?;
+    sheet1.write_string(3, 2, "文本Key D_XXX", None)?;
+    sheet1.write_string(4, 0, "NAMES", None)?;
+    sheet1.write_string(4, 1, "hash", None)?;
+    sheet1.write_string(4, 2, "value", None)?;
+    sheet1.write_string(5, 0, "ENUM", None)?;
+    sheet1.write_string(6, 0, "REF", None)?;
+
+    let workbook_lang = Workbook::new(format!("{out_path}/D多语言简体中文表.xlsx").as_str());
+    let mut sheet_lang = workbook_lang.add_worksheet(None)?;
+    sheet_lang.write_string(0, 0, "Mod", None)?;
+    sheet_lang.write_string(0, 1, "Data.LanguagezhCN", None)?;
+    sheet_lang.write_string(1, 0, "BACK_TYPE", None)?;
+    sheet_lang.write_string(2, 0, "FRONT_TYPE", None)?;
+    sheet_lang.write_string(2, 1, "uint32", None)?;
+    sheet_lang.write_string(2, 2, "string", None)?;
+    sheet_lang.write_string(3, 0, "DES", None)?;
+    sheet_lang.write_string(3, 1, "文本Key的Hash截取", None)?;
+    sheet_lang.write_string(3, 2, "中文", None)?;
+    sheet_lang.write_string(4, 0, "NAMES", None)?;
+    sheet_lang.write_string(4, 1, "hash", None)?;
+    sheet_lang.write_string(4, 2, "value", None)?;
+    sheet_lang.write_string(5, 0, "ENUM", None)?;
+    sheet_lang.write_string(6, 0, "REF", None)?;
+
+    let data = GLOBAL_LANG.read();
+    let mut sorted_keys: Vec<String> = vec![];
+    for key in data.keys() {
+        sorted_keys.push(key.to_string());
+    }
+    sorted_keys.sort();
+
+    let row = 7;
+    let mut hash_ids = vec![];
+    for key in &sorted_keys {
+        let val = data.get(key).unwrap();
+        let digest = md5::compute(key);
+        let hash =
+            (u128::from_str_radix(&format!("{:x}", digest), 16).unwrap() % 4294967296) as u32;
+        if hash_ids.contains(&hash) {
+            error!("key: {key} 的hash值重复 hash: {hash}")
+        } else {
+            hash_ids.push(hash);
+        }
+
+        sheet1.write_string(row, 0, "VALUE", None)?;
+        sheet1.write_number(row, 1, hash as f64, None)?;
+        sheet1.write_string(row, 2, key, None)?;
+
+        sheet_lang.write_string(row, 0, "VALUE", None)?;
+        sheet_lang.write_number(row, 1, hash as f64, None)?;
+        sheet_lang.write_string(row, 2, val, None)?;
+    }
+
+    workbook.close()
 }
 
 fn cell_to_json(

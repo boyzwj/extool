@@ -15,6 +15,7 @@ extern crate regex;
 extern crate serde;
 extern crate static_init;
 extern crate threads_pool;
+extern crate xlsxwriter;
 use std::fs;
 use std::sync::mpsc::channel;
 use std::time::SystemTime;
@@ -37,7 +38,7 @@ struct Args {
     ///导出目录
     #[clap(short, long, value_parser, default_value = "./")]
     output_path: String,
-    ///导出格式 NONE | JSON | LUA | EX | CS | PBD
+    ///导出格式 NONE | JSON | LUA | EX | CS | PBD | LANG
     #[clap(short, long, value_parser, default_value = "NONE")]
     format: String,
     ///是否允许多sheets导出 TRUE|FALSE
@@ -125,6 +126,10 @@ fn gen_from_excel(args: Args) {
     }
     if args.type_input.to_uppercase() == "EXCEL" && args.format.to_uppercase() == "PBD" {
         excel::create_pbd_file(&args.output_path);
+    }
+
+    if args.type_input.to_uppercase() == "EXCEL" && args.format.to_uppercase() == "LANG" {
+        excel::create_lang_file(&args.output_path).unwrap();
     }
 
     pool.clear();
