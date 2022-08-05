@@ -7,13 +7,13 @@ use prost_reflect::{MapKey, Value as PValue};
 use serde_json;
 use serde_json::value::Value;
 use serde_json::Map;
+use simple_excel_writer::*;
 use static_init::dynamic;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::string::String;
 use std::{env, fs};
-use xlsxwriter::Workbook;
 
 #[dynamic]
 static mut GLOBAL_IDS: AHashSet<String> = AHashSet::new();
@@ -744,69 +744,74 @@ pub fn create_pbd_file(out_path: &String) {
     fs::write(&pbd_path, content).unwrap();
 }
 
-pub fn create_lang_file(out_path: &String) -> Result<(), xlsxwriter::XlsxError> {
-    let workbook = Workbook::new(format!("{out_path}/D多语言Key表.xlsx").as_str());
-    let mut sheet1 = workbook.add_worksheet(None)?;
-    sheet1.write_string(0, 0, "Mod", None)?;
-    sheet1.write_string(0, 1, "Data.LanguageKey", None)?;
-    sheet1.write_string(1, 0, "BACK_TYPE", None)?;
-    sheet1.write_string(2, 0, "FRONT_TYPE", None)?;
-    sheet1.write_string(2, 1, "uint32", None)?;
-    sheet1.write_string(2, 2, "string", None)?;
-    sheet1.write_string(3, 0, "DES", None)?;
-    sheet1.write_string(3, 1, "文本Key的Hash截取", None)?;
-    sheet1.write_string(3, 2, "文本Key D_XXX", None)?;
-    sheet1.write_string(4, 0, "NAMES", None)?;
-    sheet1.write_string(4, 1, "hash", None)?;
-    sheet1.write_string(4, 2, "value", None)?;
-    sheet1.write_string(5, 0, "ENUM", None)?;
-    sheet1.write_string(6, 0, "REF", None)?;
-
-    let workbook_lang = Workbook::new(format!("{out_path}/D多语言简体中文表.xlsx").as_str());
-    let mut sheet_lang = workbook_lang.add_worksheet(None)?;
-    sheet_lang.write_string(0, 0, "Mod", None)?;
-    sheet_lang.write_string(0, 1, "Data.LanguagezhCN", None)?;
-    sheet_lang.write_string(1, 0, "BACK_TYPE", None)?;
-    sheet_lang.write_string(2, 0, "FRONT_TYPE", None)?;
-    sheet_lang.write_string(2, 1, "uint32", None)?;
-    sheet_lang.write_string(2, 2, "string", None)?;
-    sheet_lang.write_string(3, 0, "DES", None)?;
-    sheet_lang.write_string(3, 1, "文本Key的Hash截取", None)?;
-    sheet_lang.write_string(3, 2, "中文", None)?;
-    sheet_lang.write_string(4, 0, "NAMES", None)?;
-    sheet_lang.write_string(4, 1, "hash", None)?;
-    sheet_lang.write_string(4, 2, "value", None)?;
-    sheet_lang.write_string(5, 0, "ENUM", None)?;
-    sheet_lang.write_string(6, 0, "REF", None)?;
-
+pub fn create_lang_file(out_path: &String) {
     let data = GLOBAL_LANG.read();
     let mut sorted_keys: Vec<String> = vec![];
+    let mut hash_ids = vec![];
     for key in data.keys() {
         sorted_keys.push(key.to_string());
     }
     sorted_keys.sort();
 
-    let row = 7;
-    let mut hash_ids = vec![];
-    for key in &sorted_keys {
-        let hash = to_hash_id(key);
-        if hash_ids.contains(&hash) {
-            error!("key: {key} 的hash值重复 hash: {hash}")
-        } else {
-            hash_ids.push(hash);
+    let wbk_name = "D多语言Key表.xlsx";
+    let mut wbk = Workbook::create(format!("{out_path}/{wbk_name}").as_str());
+    let mut sheetk = wbk.create_sheet("sheet1");
+    sheetk.add_column(Column { width: 30.0 });
+    sheetk.add_column(Column { width: 30.0 });
+    sheetk.add_column(Column { width: 80.0 });
+
+    wbk.write_sheet(&mut sheetk, |sheet_writer| {
+        let sw = sheet_writer;
+        sw.append_row(row!["MOD", "Data.LanguageKey", ""])?;
+        sw.append_row(row!["BACK_TYPE", "", ""])?;
+        sw.append_row(row!["FRONT_TYPE", "uint32", "string"])?;
+        sw.append_row(row!["DES", "文本Key的Hash截取", "文本Key D_XXX"])?;
+        sw.append_row(row!["NAMES", "hash", "value"])?;
+        sw.append_row(row!["ENUM", blank!(2)])?;
+        sw.append_row(row!["REF", blank!(2)])?;
+        sw.append_row(row![blank!(3)])?;
+        for key in &sorted_keys {
+            let hash = to_hash_id(key);
+            if hash_ids.contains(&hash) {
+                error!("key: {key} 的hash值重复 hash: {hash}")
+            } else {
+                hash_ids.push(hash);
+            }
+            sw.append_row(row!["VALUE", hash.to_string(), key.to_string()])?;
         }
+        sw.append_row(row![blank!(3)])
+    })
+    .expect("write Data.LanguageKey excel error!");
+    wbk.close()
+        .expect(format!("close {wbk_name} error!").as_str());
 
-        sheet1.write_string(row, 0, "VALUE", None)?;
-        sheet1.write_number(row, 1, hash as f64, None)?;
-        sheet1.write_string(row, 2, key, None)?;
+    let wbl_name = "D多语言简体中文表.xlsx";
+    let mut wbl = Workbook::create(format!("{out_path}/{wbl_name}").as_str());
+    let mut sheetl = wbl.create_sheet("sheet1");
+    sheetl.add_column(Column { width: 30.0 });
+    sheetl.add_column(Column { width: 30.0 });
+    sheetl.add_column(Column { width: 80.0 });
 
-        sheet_lang.write_string(row, 0, "VALUE", None)?;
-        sheet_lang.write_number(row, 1, hash as f64, None)?;
-        let val = data.get(key).unwrap();
-        sheet_lang.write_string(row, 2, val, None)?;
-    }
-
-    workbook.close()
+    wbl.write_sheet(&mut sheetl, |sheet_writer| {
+        let sw = sheet_writer;
+        sw.append_row(row!["MOD", "Data.LanguagezhCN", ""])?;
+        sw.append_row(row!["BACK_TYPE", "", ""])?;
+        sw.append_row(row!["FRONT_TYPE", "uint32", "string"])?;
+        sw.append_row(row!["DES", "文本Key的Hash截取", "中文"])?;
+        sw.append_row(row!["NAMES", "hash", "value"])?;
+        sw.append_row(row!["ENUM", blank!(2)])?;
+        sw.append_row(row!["REF", blank!(2)])?;
+        sw.append_row(row![blank!(3)])?;
+        for key in &sorted_keys {
+            let hash = to_hash_id(key);
+            let val = data.get(key).unwrap();
+            sw.append_row(row!["VALUE", hash.to_string(), val.to_string()])?;
+        }
+        sw.append_row(row![blank!(3)])
+    })
+    .expect("write Data.LanguagezhCN excel error!");
+    wbl.close()
+        .expect(format!("close {wbl_name} error!").as_str());
 }
 
 fn cell_to_json(

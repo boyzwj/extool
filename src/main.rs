@@ -13,9 +13,9 @@ extern crate prost;
 extern crate prost_reflect;
 extern crate regex;
 extern crate serde;
+extern crate simple_excel_writer;
 extern crate static_init;
 extern crate threads_pool;
-extern crate xlsxwriter;
 use std::fs;
 use std::sync::mpsc::channel;
 use std::time::SystemTime;
@@ -129,7 +129,7 @@ fn gen_from_excel(args: Args) {
     }
 
     if args.type_input.to_uppercase() == "EXCEL" && args.format.to_uppercase() == "LANG" {
-        excel::create_lang_file(&args.output_path).unwrap();
+        excel::create_lang_file(&args.output_path);
     }
 
     pool.clear();
