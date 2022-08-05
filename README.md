@@ -68,7 +68,15 @@ C常量配置.xlsx  D兑换码.xlsx
 * 模块名称 对应表格导出的类名/文件名,统一用 Data.开头，例如  Data.Const  Data.Gun,以Json为例导出的文件名为
   data_const.json  data_gun.json ..
 * 后端导出字段类型  string | int | float | list ,不填则后端不导出该字段,若所有字段都不填，则后端不导出该表
-* 前端导出字段类型  string | loc_string | int | float | list ,不填则前端不到处该字段,若所有字段都不填，则前端不导出该表（int类型会做一次四舍五入取整操作,比如字段内容为4.9 实际导出则为5）
+* 前端导出字段类型  string | string_loc | int | int(32|64) | uint(32|64) | float | list | list_(int32|int64|uint32|uint64|string|float)) ,不填则前端不到处该字段,若所有字段都不填，则前端不导出该表（int类型会做一次四舍五入取整操作,比如字段内容为4.9 实际导出则为5）
+
+  * int 等价于 uint32
+  * list 等价于 list_uint32
+  * list_int 等价于 list_uint32
+
+* string_loc 为多语言处理列，导出时处理规则如下：
+
+  * string_loc所在列导出时的实际值是通过(u128::from_str_radix(&format!("{:x}", digest), 16).unwrap() % 4294967296) as u32 算法得到的，所以该列的导出类型是uint32。
 
 ***int类型 会做一次四舍五入取整操作,比如字段内容为4.9 实际导出则为5***
 ***list类型 会导出时额外加一层括号，例如当填1时,则实际导出为[1],填 1,2,3,4,5 则导出为 [1,2,3,4,5]***

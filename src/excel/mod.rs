@@ -335,6 +335,7 @@ impl<'a> SheetData<'_> {
                     "LIST_FLOAT" => "repeated float".to_string(),
                     "LIST_STRING" => "repeated string".to_string(),
                     "ENUM" => "uint32".to_string(),
+                    "STRING_LOC" => "uint32".to_string(),
                     _ => ft.to_lowercase(),
                 };
                 field_schemas.push(format!("\t{} {} = {}; //{}", &field_schema, fk, n, des));
@@ -788,10 +789,7 @@ pub fn create_lang_file(out_path: &String) -> Result<(), xlsxwriter::XlsxError> 
     let row = 7;
     let mut hash_ids = vec![];
     for key in &sorted_keys {
-        let val = data.get(key).unwrap();
-        let digest = md5::compute(key);
-        let hash =
-            (u128::from_str_radix(&format!("{:x}", digest), 16).unwrap() % 4294967296) as u32;
+        let hash = to_hash_id(key);
         if hash_ids.contains(&hash) {
             error!("key: {key} 的hash值重复 hash: {hash}")
         } else {
@@ -804,6 +802,7 @@ pub fn create_lang_file(out_path: &String) -> Result<(), xlsxwriter::XlsxError> 
 
         sheet_lang.write_string(row, 0, "VALUE", None)?;
         sheet_lang.write_number(row, 1, hash as f64, None)?;
+        let val = data.get(key).unwrap();
         sheet_lang.write_string(row, 2, val, None)?;
     }
 
@@ -855,6 +854,8 @@ fn cell_to_json(
             data.push(json!(val))
         }
         json!(data)
+    } else if row_type == "STRING_LOC" {
+        json!(to_hash_id(&s))
     } else {
         json!(s)
     }
@@ -892,6 +893,11 @@ fn cell_to_string(cell: &DataType, row_type: &String, _filename: &String, _key: 
             return "\"\"".to_string();
         }
         return format!("\"{}\"", s);
+    } else if row_type == "STRING_LOC" {
+        if s == "" {
+            return "".to_string();
+        }
+        return format!("{}", to_hash_id(&s));
     } else {
         s
     }
@@ -1004,6 +1010,8 @@ fn cell_to_pvalue(
             result.push(PValue::String(list[i].to_string()))
         }
         return PValue::List(result);
+    } else if row_type == "STRING_LOC" {
+        return PValue::U32(to_hash_id(&s));
     } else if row_type == "STRING" {
         return PValue::String(s);
     } else {
@@ -1081,4 +1089,9 @@ fn get_real_back_type(ref_name: &String, origin_type: &String, is_enum: bool) ->
     } else {
         return origin_type.to_string();
     }
+}
+
+fn to_hash_id(key: &String) -> u32 {
+    let digest = md5::compute(key);
+    return (u128::from_str_radix(&format!("{:x}", digest), 16).unwrap() % 4294967296) as u32;
 }
