@@ -287,7 +287,7 @@ impl<'a> SheetData<'_> {
         if self.values.len() == 0 || self.output_file_name.len() <= 0 {
             return;
         }
-        let module_name = get_module_name(self.output_file_name.clone());
+        let module_name = self.mod_name.clone();
         let out = format!(
             "defmodule {} do\n\
              \t## SOURCE:\"{}\" SHEET:\"{}\"\n\n\
