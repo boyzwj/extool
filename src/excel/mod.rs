@@ -42,6 +42,7 @@ pub struct SheetData<'a> {
     describes: Vec<String>,
     enums: Vec<AHashMap<String, usize>>,
     values: Vec<Vec<&'a DataType>>,
+    force_mods: Vec<String>,
 }
 
 impl<'a> SheetData<'_> {
@@ -347,13 +348,7 @@ impl<'a> SheetData<'_> {
         if field_schemas.len() == 0 {
             return;
         }
-        let msg_schema = format!(
-            "message {}{{\n\
-            {}\n\
-            }}",
-            msg_name,
-            field_schemas.join("\n")
-        );
+
         let key_name = &self.names[valid_columns[0]];
         if valid_front_types[0].contains("LIST") || valid_front_types[0] == "FLOAT" {
             error!(
@@ -366,14 +361,27 @@ impl<'a> SheetData<'_> {
         if map_key_type == "ENUM" {
             map_key_type = "UINT32".to_string();
         }
+
+        let mut class_name = msg_name.to_string();
+        if self.force_mods.len() > 0 && !self.force_mods[1].is_empty() {
+            class_name = self.force_mods[1].to_string();
+        }
+
+        let msg_schema = format!(
+            "message {}{{\n\
+            {}\n\
+            }}",
+            class_name,
+            field_schemas.join("\n")
+        );
         let out = format!(
             "message Data{}{{\n\
              \tmap<{},{}> data = 1;\n\
             }}\n\
             {}",
-            msg_name,
+            class_name,
             &map_key_type.to_lowercase(),
-            msg_name,
+            class_name,
             msg_schema
         );
 
@@ -386,7 +394,7 @@ impl<'a> SheetData<'_> {
         );
         let path_str = format!("{}/tmp_{}.proto", out_path, msg_name.to_lowercase());
         self.write_file(&path_str, &content);
-        GLOBAL_PBD.write().insert(msg_name.to_string(), out);
+        GLOBAL_PBD.write().insert(class_name.to_string(), out);
 
         // builder bin data
         let mut builder = prost_reflect_build::Builder::new();
@@ -397,8 +405,8 @@ impl<'a> SheetData<'_> {
         // new  messagedescriptor
         let bytes = fs::read(&bin_path).unwrap();
         let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
-        let n1 = format!("pbd.Data{}", msg_name);
-        let n2 = format!("pbd.{}", msg_name);
+        let n1 = format!("pbd.Data{}", &class_name);
+        let n2 = format!("pbd.{}", &class_name);
         let info_des = pool.get_message_by_name(&n1).unwrap();
         let mut info_dm = DynamicMessage::new(info_des);
         let msg_des = pool.get_message_by_name(&n2).unwrap();
@@ -452,6 +460,7 @@ impl<'a> SheetData<'_> {
         let out_pbd_path = format!("{}/data_{}.bytes", out_path, msg_name.to_lowercase());
         fs::write(out_pbd_path, buf).unwrap();
     }
+
     pub fn data_to_lang(&self, _out_path: &String) {
         for i in 1..self.types.len() {
             if &self.types[i] == "STRING_LOC" {
@@ -460,7 +469,13 @@ impl<'a> SheetData<'_> {
                     .names
                     .iter()
                     .position(|r| r == &lang_field_name)
-                    .unwrap();
+                    .expect(
+                        format!(
+                            "没有找到字段名: `{lang_field_name}`, 需要设置！File: [{}] Sheet: [{}]",
+                            self.input_file_name, self.sheet_name
+                        )
+                        .as_str(),
+                    );
                 for rows in &self.values {
                     let lang_key = rows[i].to_string();
                     let lang_val = rows[lang_field_index].to_string();
@@ -585,6 +600,7 @@ pub fn sheet_to_data<'a>(
     let mut describes: Vec<String> = vec![];
     let mut enums: Vec<AHashMap<String, usize>> = vec![];
     let mut row_num: usize = 0;
+    let mut force_mods: Vec<String> = vec![];
     for row in sheet.rows() {
         row_num = row_num + 1;
         let mut st = row[0].to_string().trim().to_string();
@@ -630,6 +646,11 @@ pub fn sheet_to_data<'a>(
                     }
                     enums.push(dic);
                 }
+            }
+        } else if st == "FORCE_MOD" {
+            for v in row {
+                let mod_name = v.to_string().trim().to_string();
+                force_mods.push(mod_name);
             }
         } else if st == "VALUE" {
             let mut row_value: Vec<&DataType> = vec![];
@@ -704,6 +725,7 @@ pub fn sheet_to_data<'a>(
         refs: refs,
         describes: describes,
         enums: enums,
+        force_mods: force_mods,
     };
     return info;
 }
@@ -801,6 +823,7 @@ pub fn create_lang_file(out_path: &String) {
         sw.append_row(row!["NAMES", "hash", "value"])?;
         sw.append_row(row!["ENUM", blank!(2)])?;
         sw.append_row(row!["REF", blank!(2)])?;
+        sw.append_row(row!["FORCE_MOD", "Language", ""])?;
         sw.append_row(row![blank!(3)])?;
         for key in &sorted_keys {
             let hash = to_hash_id(key);
