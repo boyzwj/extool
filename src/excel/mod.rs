@@ -1,5 +1,6 @@
 use ahash::{AHashMap, AHashSet};
 use calamine::{open_workbook, DataType, Range, Reader, Xlsx};
+use indexmap::IndexMap;
 use inflector::Inflector;
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage};
@@ -9,7 +10,6 @@ use serde_json::value::Value;
 use serde_json::Map;
 use simple_excel_writer::*;
 use static_init::dynamic;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::string::String;
@@ -410,7 +410,7 @@ impl<'a> SheetData<'_> {
         let info_des = pool.get_message_by_name(&n1).unwrap();
         let mut info_dm = DynamicMessage::new(info_des);
         let msg_des = pool.get_message_by_name(&n2).unwrap();
-        let mut data: HashMap<MapKey, PValue> = HashMap::new();
+        let mut data: IndexMap<MapKey, PValue> = IndexMap::new();
         let mut row = 1;
         for x in 0..self.values.len() {
             let mut dm = DynamicMessage::new(msg_des.clone());

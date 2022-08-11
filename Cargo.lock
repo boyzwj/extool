@@ -40,9 +40,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.59"
+version = "1.0.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c91f1f46651137be86f3a2b9a8359f9ab421d04d941c62b5982e1ca21113adf9"
+checksum = "508b352bb5c066aac251f6daf6b36eccd03e8a88e8081cd44959ea277a3af9a8"
 
 [[package]]
 name = "async-task"
@@ -301,11 +301,12 @@ dependencies = [
  "calamine",
  "clap",
  "env_logger",
+ "indexmap",
  "log",
  "md5",
  "num_cpus",
  "prost",
- "prost-reflect",
+ "prost-reflect 0.8.1 (git+https://github.com/slientgoat/prost-reflect?tag=0.8.2)",
  "prost-reflect-build",
  "quote",
  "regex",
@@ -438,9 +439,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.127"
+version = "0.2.129"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "505e71a4706fa491e9b1b55f51b95d4037d0821ee40131190475f692b35b009b"
+checksum = "64de3cc433455c14174d42e554d4027ee631c4d046d43e3ecc6efc4636cdc7a7"
 
 [[package]]
 name = "lock_api"
@@ -692,13 +693,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-reflect"
+version = "0.8.1"
+source = "git+https://github.com/slientgoat/prost-reflect?tag=0.8.2#222a6efa90387af0802fa1aaa906aef4bfd8b2cc"
+dependencies = [
+ "indexmap",
+ "prost",
+ "prost-types",
+]
+
+[[package]]
 name = "prost-reflect-build"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a24c777d3470654a9f594285a43a29f054a13f38c3408b2c7474fc5926647827"
 dependencies = [
  "prost-build",
- "prost-reflect",
+ "prost-reflect 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -935,15 +946,15 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.142"
+version = "1.0.143"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e590c437916fb6b221e1d00df6e3294f3fccd70ca7e92541c475d6ed6ef5fee2"
+checksum = "53e8e5d5b70924f74ff5c6d64d9a5acd91422117c60f48c4e07855238a254553"
 
 [[package]]
 name = "serde_derive"
-version = "1.0.142"
+version = "1.0.143"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34b5b8d809babe02f538c2cfec6f2c1ed10804c0e5a6a041a049a4f5588ccc2e"
+checksum = "d3d8e8de557aee63c26b85b947f5e59b690d0454c753f3adeb5cd7835ab88391"
 dependencies = [
  "proc-macro2",
  "quote",

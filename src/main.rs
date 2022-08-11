@@ -8,6 +8,7 @@ extern crate inflector;
 #[macro_use]
 extern crate log;
 
+extern crate indexmap;
 extern crate num_cpus;
 extern crate prost;
 extern crate prost_reflect;
