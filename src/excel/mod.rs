@@ -277,7 +277,7 @@ impl<'a> SheetData<'_> {
                 }
 
                 res.push(format!(
-                    "\tdef get({}) do\n\t\t%{{\n{}\n\t}}",
+                    "\tdef get({}) do\n\t\t%{{\n{}\n\t\t}}\n\tend\n",
                     keyvalue,
                     columns.join(",\n")
                 ));
