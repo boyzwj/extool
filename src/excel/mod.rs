@@ -362,6 +362,10 @@ impl<'a> SheetData<'_> {
             map_key_type = "UINT32".to_string();
         }
 
+        if map_key_type == "STRING_LOC" {
+            map_key_type = "UINT32".to_string();
+        }
+
         let mut class_name = msg_name.to_string();
         if self.force_mods.len() > 0 && !self.force_mods[1].is_empty() {
             class_name = self.force_mods[1].to_string();
