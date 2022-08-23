@@ -407,7 +407,7 @@ impl<'a> SheetData<'_> {
         env::set_var("OUT_DIR", out_path);
         match builder.compile_protos(&[&path_str], &["."]) {
             Err(e) => {
-                println!("Error: {e}");
+                error!("Error: {e}");
                 return;
             }
 
