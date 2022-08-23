@@ -405,7 +405,14 @@ impl<'a> SheetData<'_> {
         let bin_path = format!("{}/tmp_{}.bin", out_path, msg_name.to_lowercase());
         builder.file_descriptor_set_path(&bin_path);
         env::set_var("OUT_DIR", out_path);
-        builder.compile_protos(&[&path_str], &["."]).unwrap();
+        match builder.compile_protos(&[&path_str], &["."]) {
+            Err(e) => {
+                println!("Error: {e}");
+                return;
+            }
+
+            _ => (),
+        };
         // new  messagedescriptor
         let bytes = fs::read(&bin_path).unwrap();
         let pool = DescriptorPool::decode(bytes.as_ref()).unwrap();
@@ -572,6 +579,14 @@ pub fn build_id(input_file_name: String, multi_sheets: bool) {
                     for i in 1..row.len() {
                         let rv = row[i].clone().to_string().trim().to_uppercase();
                         if !rv.is_empty() {
+                            let first_char = &rv.chars().next().unwrap();
+                            if first_char.is_ascii_digit() {
+                                error!(
+                                    "NAMES 不能存在以数字开头的字段【{}】!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Column: {}\n",&rv,
+                                    &input_file_name, &sheet,&mod_name, row_num, i
+                                );
+                                continue;
+                            }
                             if names.contains(&rv) {
                                 error!(
                                     "NAMES 配置了重复的字段【{}】!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Column: {}\n",&rv,
