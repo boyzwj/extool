@@ -98,8 +98,9 @@ fn gen_from_excel(args: Args) {
         let file1 = file.clone();
         let tx = tx.clone();
         let multi_sheets = args.multi_sheets.clone().to_uppercase() == "TRUE";
+        let export_columns = args.export_columns.clone().to_uppercase();
         pool.execute(move || {
-            excel::build_id(file1, multi_sheets);
+            excel::build_id(file1, multi_sheets, export_columns);
             tx.send(()).unwrap();
         })
         .ok();

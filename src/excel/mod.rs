@@ -29,6 +29,8 @@ static mut GLOBAL_PBD: AHashMap<String, String> = AHashMap::new();
 
 #[dynamic]
 static mut GLOBAL_LANG: AHashMap<String, String> = AHashMap::new();
+#[dynamic]
+static mut GLOBAL_EXCLUDE_SHEETS: AHashSet<String> = AHashSet::new();
 
 // static mut
 pub struct SheetData<'a> {
@@ -407,8 +409,11 @@ impl<'a> SheetData<'_> {
         env::set_var("OUT_DIR", out_path);
         match builder.compile_protos(&[&path_str], &["."]) {
             Err(e) => {
-                error!("Error: {e}");
-                return;
+                error!(
+                    "协议文件编译错误 ,File: [{}],Sheet: [{}] ERR: {}",
+                    &self.input_file_name, &self.sheet_name, e
+                );
+                panic!("协议文件编译错误");
             }
 
             _ => (),
@@ -512,6 +517,10 @@ pub fn xls_to_file(
         sheets = vec![excel.sheet_names()[0].to_string()];
     }
     for sheet in sheets {
+        let sheet_path = format!("{}.{}", &input_file_name, &sheet);
+        if GLOBAL_EXCLUDE_SHEETS.read().contains(&sheet_path) {
+            continue;
+        }
         info!("LOADING [{}] [{}] ...", input_file_name, sheet);
         if let Some(Ok(r)) = excel.worksheet_range(&sheet) {
             let data = sheet_to_data(
@@ -525,25 +534,32 @@ pub fn xls_to_file(
     }
 }
 
-pub fn build_id(input_file_name: String, multi_sheets: bool) {
+pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: String) {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
     let mut sheets = excel.sheet_names().to_owned();
+
     if !multi_sheets {
         sheets = vec![excel.sheet_names()[0].to_string()];
     }
     for sheet in sheets {
+        let sheet_path = format!("{}.{}", &input_file_name, &sheet);
+
         if let Some(Ok(r)) = excel.worksheet_range(&sheet) {
-            let mut mod_name: String = String::new();
             let mut row_num = 0;
             let mut names: AHashSet<String> = AHashSet::new();
+            let mut front_primary = String::new();
+            let mut back_primary = String::new();
+            let mut mod_name: String = String::new();
             for row in r.rows() {
                 row_num = row_num + 1;
                 let mut st = row[0].to_string().trim().to_string();
                 st.make_ascii_uppercase();
                 if st == "MOD" {
                     mod_name = row[1].to_string().trim().to_string();
-                } else if mod_name.is_empty() {
-                    break;
+                    if mod_name.is_empty() {
+                        GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path);
+                        break;
+                    }
                 } else if st == "VALUE" {
                     let key = format!("{}:{}", mod_name, row[1].to_string().trim().to_string());
                     if GLOBAL_IDS.read().contains(&key) {
@@ -556,26 +572,50 @@ pub fn build_id(input_file_name: String, multi_sheets: bool) {
                         GLOBAL_IDS.write().insert(key);
                     }
                 } else if st == "BACK_TYPE" {
-                    for i in 1..row.len() {
-                        let rv = row[i].clone().to_string().trim().to_uppercase();
-                        if !rv.is_empty() {
-                            GLOBAL_BACK_PRIMARYS
-                                .write()
-                                .insert(mod_name.to_string(), rv);
-                            break;
-                        }
-                    }
+                    back_primary = row[1].clone().to_string().trim().to_uppercase();
                 } else if st == "FRONT_TYPE" {
-                    for i in 1..row.len() {
-                        let rv = row[i].clone().to_string().trim().to_uppercase();
-                        if !rv.is_empty() {
-                            GLOBAL_FRONT_PRIMARYS
-                                .write()
-                                .insert(mod_name.to_string(), rv);
-                            break;
-                        }
-                    }
+                    front_primary = row[1].clone().to_string().trim().to_uppercase();
                 } else if st == "NAMES" {
+                    if export_columns == "BACK" && back_primary.is_empty() {
+                        info!(
+                            "SKIPPING for {}_TYPE is none！File: [{}] Sheet: [{}],export_columns: [{}]\n",
+                            &export_columns, &input_file_name, &sheet, &export_columns
+                        );
+                        GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path);
+                        break;
+                    } else if export_columns == "FRONT" && front_primary.is_empty() {
+                        info!(
+                            "SKIPPING for {}_TYPE is none！File: [{}] Sheet: [{}],export_columns: [{}]\n",
+                            &export_columns, &input_file_name, &sheet, &export_columns
+                        );
+                        GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path);
+                        break;
+                    } else if front_primary.is_empty() && back_primary.is_empty() {
+                        info!(
+                            "SKIPPING for both `FRONT_TYPE` and `BACK_TYPE`  is none！ File: [{}] Sheet: [{}],export_columns: [{}]\n",
+                            &&input_file_name, &sheet,&export_columns
+                        );
+                        GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path);
+                        break;
+                    }
+                    if !back_primary.is_empty() {
+                        GLOBAL_BACK_PRIMARYS
+                            .write()
+                            .insert(mod_name.to_string(), back_primary.to_string());
+                    }
+                    if !front_primary.is_empty() {
+                        GLOBAL_FRONT_PRIMARYS
+                            .write()
+                            .insert(mod_name.to_string(), front_primary.to_string());
+                    }
+
+                    let primary_key = row[1].clone().to_string().trim().to_uppercase();
+                    if primary_key.is_empty() {
+                        error!(
+                        "NAMES的第二列固定为主键列，不能为空!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Column: {}\n",
+                        &input_file_name, &sheet,&mod_name, row_num,1);
+                    }
+
                     for i in 1..row.len() {
                         let rv = row[i].clone().to_string().trim().to_uppercase();
                         if !rv.is_empty() {
@@ -585,6 +625,8 @@ pub fn build_id(input_file_name: String, multi_sheets: bool) {
                                     "NAMES 不能存在以数字开头的字段【{}】!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Column: {}\n",&rv,
                                     &input_file_name, &sheet,&mod_name, row_num, i
                                 );
+                                GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path.to_string());
+
                                 continue;
                             }
                             if names.contains(&rv) {
