@@ -576,27 +576,26 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
                 } else if st == "FRONT_TYPE" {
                     front_primary = row[1].clone().to_string().trim().to_uppercase();
                 } else if st == "NAMES" {
-                    if export_columns == "BACK" && back_primary.is_empty() {
-                        info!(
-                            "SKIPPING for {}_TYPE is none！File: [{}] Sheet: [{}],export_columns: [{}]\n",
-                            &export_columns, &input_file_name, &sheet, &export_columns
-                        );
-                        GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path);
-                        break;
-                    } else if export_columns == "FRONT" && front_primary.is_empty() {
-                        info!(
-                            "SKIPPING for {}_TYPE is none！File: [{}] Sheet: [{}],export_columns: [{}]\n",
-                            &export_columns, &input_file_name, &sheet, &export_columns
-                        );
-                        GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path);
-                        break;
-                    } else if front_primary.is_empty() && back_primary.is_empty() {
+                    // if export_columns == "BACK" && back_primary.is_empty() {
+                    //     info!(
+                    //         "SKIPPING for {}_TYPE is none！File: [{}] Sheet: [{}],export_columns: [{}]\n",
+                    //         &export_columns, &input_file_name, &sheet, &export_columns
+                    //     );
+                    //     GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path.to_string());
+                    // } else if export_columns == "FRONT" && front_primary.is_empty() {
+                    //     info!(
+                    //         "SKIPPING for {}_TYPE is none！File: [{}] Sheet: [{}],export_columns: [{}]\n",
+                    //         &export_columns, &input_file_name, &sheet, &export_columns
+                    //     );
+                    //     GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path.to_string());
+                    // }
+
+                    if front_primary.is_empty() && back_primary.is_empty() {
                         info!(
                             "SKIPPING for both `FRONT_TYPE` and `BACK_TYPE`  is none！ File: [{}] Sheet: [{}],export_columns: [{}]\n",
                             &&input_file_name, &sheet,&export_columns
                         );
-                        GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path);
-                        break;
+                        GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path.to_string());
                     }
                     if !back_primary.is_empty() {
                         GLOBAL_BACK_PRIMARYS
@@ -625,8 +624,6 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
                                     "NAMES 不能存在以数字开头的字段【{}】!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Column: {}\n",&rv,
                                     &input_file_name, &sheet,&mod_name, row_num, i
                                 );
-                                GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path.to_string());
-
                                 continue;
                             }
                             if names.contains(&rv) {
