@@ -12,9 +12,9 @@ use simple_excel_writer::*;
 use static_init::dynamic;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::io::{Error, ErrorKind};
 use std::string::String;
 use std::{env, fs};
-
 #[dynamic]
 static mut GLOBAL_IDS: AHashSet<String> = AHashSet::new();
 
@@ -48,31 +48,34 @@ pub struct SheetData<'a> {
 }
 
 impl<'a> SheetData<'_> {
-    pub fn export(&self, format: &String, dst_path: &String) {
+    pub fn export(&self, format: &String, dst_path: &String) -> Result<usize, usize> {
         let temp = format.to_uppercase();
         if temp == "JSON" {
-            self.data_to_json(&dst_path);
+            return self.data_to_json(&dst_path);
         } else if temp == "LUA" {
-            self.data_to_lua(&dst_path);
+            return self.data_to_lua(&dst_path);
         } else if temp == "EX" {
-            self.data_to_ex(&dst_path);
+            return self.data_to_ex(&dst_path);
         } else if temp == "PBD" {
-            self.data_to_pbd(&dst_path);
+            return self.data_to_pbd(&dst_path);
         } else if temp == "LANG" {
-            self.data_to_lang(&dst_path);
+            return self.data_to_lang(&dst_path);
         }
+        return Ok(0);
     }
 
-    pub fn write_file(&self, path_str: &str, content: &String) {
+    pub fn write_file(&self, path_str: &str, content: &String) -> usize {
         match File::create(path_str) {
             Err(e) => {
                 error!("创建导出文件失败 : {:?}", e);
+                return 1;
             }
             Ok(f) => {
                 let mut bw = BufWriter::new(f);
                 match bw.write_all(content.as_bytes()) {
                     Err(e) => {
                         error!("写入导出内容失败 : {:?}", e);
+                        return 1;
                     }
                     Ok(_) => {
                         info!(
@@ -81,13 +84,14 @@ impl<'a> SheetData<'_> {
                             self.sheet_name,
                             self.values.len()
                         );
+                        return 0;
                     }
                 }
             }
         }
     }
 
-    pub fn data_to_json(&self, out_path: &String) {
+    pub fn data_to_json(&self, out_path: &String) -> Result<usize, usize> {
         let mut res: Map<String, Value> = Map::new();
         for rv in &self.values {
             let mut map: Map<String, Value> = Map::new();
@@ -117,7 +121,8 @@ impl<'a> SheetData<'_> {
                                 &rv[1],
                                 value,
                                 &self.enums[i].keys()
-                            )
+                            );
+                            return Err(1);
                         }
                     }
                 }
@@ -136,15 +141,19 @@ impl<'a> SheetData<'_> {
         }
 
         if self.values.len() == 0 || self.output_file_name.len() <= 0 {
-            return;
+            return Ok(0);
         }
         let obj = json!(res);
         let json = serde_json::to_string_pretty(&obj).unwrap();
         let path_str = format!("{}/{}.json", out_path, self.output_file_name);
-        self.write_file(&path_str, &json);
+        match self.write_file(&path_str, &json) {
+            0 => (),
+            _ => return Err(1),
+        }
+        return Ok(0);
     }
 
-    pub fn data_to_lua(&self, out_path: &String) {
+    pub fn data_to_lua(&self, out_path: &String) -> Result<usize, usize> {
         let mut res: Vec<String> = vec![];
         let mut kns: Vec<String> = vec![];
         let mut j = 1;
@@ -179,7 +188,7 @@ impl<'a> SheetData<'_> {
                                 value,
                                 &self.enums[i].keys()
                             );
-                            panic!("abort")
+                            return Err(1);
                         }
                     }
                 }
@@ -202,7 +211,7 @@ impl<'a> SheetData<'_> {
         }
 
         if self.values.len() == 0 || self.output_file_name.len() <= 0 {
-            return;
+            return Ok(0);
         }
         let out = format!(
             "local KT = {{{}}}\n\
@@ -230,10 +239,14 @@ impl<'a> SheetData<'_> {
             res.join(",\n"),
         );
         let path_str = format!("{}/{}.lua", out_path, self.output_file_name);
-        self.write_file(&path_str, &out);
+        match self.write_file(&path_str, &out) {
+            0 => (),
+            _ => return Err(1),
+        }
+        return Ok(0);
     }
 
-    pub fn data_to_ex(&self, dst_path: &String) {
+    pub fn data_to_ex(&self, dst_path: &String) -> Result<usize, usize> {
         let mut res: Vec<String> = vec![];
         let mut ids: Vec<String> = vec![];
         for rv in &self.values {
@@ -260,7 +273,7 @@ impl<'a> SheetData<'_> {
                                 value,
                                 &self.enums[i].keys()
                             );
-                            panic!("abort")
+                            return Err(1);
                         }
                     }
                 }
@@ -288,7 +301,7 @@ impl<'a> SheetData<'_> {
         }
 
         if self.values.len() == 0 || self.output_file_name.len() <= 0 {
-            return;
+            return Ok(0);
         }
         let module_name = self.mod_name.clone();
         let out = format!(
@@ -310,12 +323,16 @@ impl<'a> SheetData<'_> {
             res.join("\n")
         );
         let path_str = format!("{}/{}.ex", dst_path, self.output_file_name);
-        self.write_file(&path_str, &out);
+        match self.write_file(&path_str, &out) {
+            0 => (),
+            _ => return Err(1),
+        }
+        return Ok(0);
     }
 
-    pub fn data_to_pbd(&self, out_path: &String) {
+    pub fn data_to_pbd(&self, out_path: &String) -> Result<usize, usize> {
         if self.mod_name == "" {
-            return;
+            return Ok(0);
         }
         let mut field_schemas: Vec<String> = vec![];
         let msg_name = self.mod_name.to_string().replace("Data.", "");
@@ -348,7 +365,7 @@ impl<'a> SheetData<'_> {
             }
         }
         if field_schemas.len() == 0 {
-            return;
+            return Ok(0);
         }
 
         let key_name = &self.names[valid_columns[0]];
@@ -357,7 +374,7 @@ impl<'a> SheetData<'_> {
                 "主键仅支持整型类型和字符串类型!请确定字段[{}]的类型  File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
                 key_name, &self.input_file_name, &self.sheet_name, &self.mod_name, key_name, valid_front_types[0]
             );
-            panic!("abort");
+            return Err(1);
         }
         let mut map_key_type = valid_front_types[0].to_string();
         if map_key_type == "ENUM" {
@@ -399,7 +416,10 @@ impl<'a> SheetData<'_> {
             out
         );
         let path_str = format!("{}/tmp_{}.proto", out_path, msg_name.to_lowercase());
-        self.write_file(&path_str, &content);
+        match self.write_file(&path_str, &content) {
+            0 => (),
+            _ => return Err(1),
+        }
         GLOBAL_PBD.write().insert(class_name.to_string(), out);
 
         // builder bin data
@@ -413,7 +433,7 @@ impl<'a> SheetData<'_> {
                     "协议文件编译错误 ,File: [{}],Sheet: [{}] ERR: {}",
                     &self.input_file_name, &self.sheet_name, e
                 );
-                panic!("协议文件编译错误");
+                return Err(1);
             }
 
             _ => (),
@@ -447,6 +467,7 @@ impl<'a> SheetData<'_> {
                             enu_val,
                             &self.enums[i].keys()
                         );
+                        return Err(1);
                     }
                 } else {
                     let p_val =
@@ -465,7 +486,7 @@ impl<'a> SheetData<'_> {
                 PValue::String(ref s) => data.insert(MapKey::String(s.to_string()), dy_msg),
                 _ => {
                     error!("键值的数据类型不对! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Key: {}\n", &self.input_file_name,&self.sheet_name,&self.mod_name,row,key_name);
-                    panic!("abort");
+                    return Err(1);
                 }
             };
             row = row + 1;
@@ -475,9 +496,10 @@ impl<'a> SheetData<'_> {
         info_dm.encode(&mut buf).unwrap();
         let out_pbd_path = format!("{}/data_{}.bytes", out_path, msg_name.to_lowercase());
         fs::write(out_pbd_path, buf).unwrap();
+        return Ok(0);
     }
 
-    pub fn data_to_lang(&self, _out_path: &String) {
+    pub fn data_to_lang(&self, _out_path: &String) -> Result<usize, usize> {
         for i in 1..self.types.len() {
             if &self.types[i] == "STRING_LOC" {
                 let lang_field_name = format!("{}_local", self.names[i].trim());
@@ -500,6 +522,7 @@ impl<'a> SheetData<'_> {
                 }
             }
         }
+        return Ok(0);
     }
 }
 
@@ -509,7 +532,7 @@ pub fn xls_to_file(
     format: String,
     multi_sheets: bool,
     export_columns: String,
-) {
+) -> usize {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
     let mut sheets = excel.sheet_names().to_owned();
 
@@ -523,18 +546,26 @@ pub fn xls_to_file(
         }
         info!("LOADING [{}] [{}] ...", input_file_name, sheet);
         if let Some(Ok(r)) = excel.worksheet_range(&sheet) {
-            let data = sheet_to_data(
+            let result = sheet_to_data(
                 input_file_name.clone(),
                 &sheet,
                 &r,
                 export_columns.to_string(),
             );
-            data.export(&format, &dst_path);
+
+            match result {
+                Ok(data) => match data.export(&format, &dst_path) {
+                    Ok(code) => return code,
+                    Err(err_code) => return err_code,
+                },
+                Err(err_code) => return err_code,
+            }
         }
     }
+    return 0;
 }
 
-pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: String) {
+pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: String) -> usize {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
     let mut sheets = excel.sheet_names().to_owned();
 
@@ -567,7 +598,7 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
                             "配置了重复的键值!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Key: {} \n",
                             &input_file_name, &sheet,&mod_name, row_num, &key
                         );
-                        panic!("abort");
+                        return 1;
                     } else {
                         GLOBAL_IDS.write().insert(key);
                     }
@@ -613,6 +644,7 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
                         error!(
                         "NAMES的第二列固定为主键列，不能为空!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Column: {}\n",
                         &input_file_name, &sheet,&mod_name, row_num,1);
+                        return 1;
                     }
 
                     for i in 1..row.len() {
@@ -624,14 +656,14 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
                                     "NAMES 不能存在以数字开头的字段【{}】!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Column: {}\n",&rv,
                                     &input_file_name, &sheet,&mod_name, row_num, i
                                 );
-                                continue;
+                                return 1;
                             }
                             if names.contains(&rv) {
                                 error!(
                                     "NAMES 配置了重复的字段【{}】!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Column: {}\n",&rv,
                                     &input_file_name, &sheet,&mod_name, row_num, i
                                 );
-                                continue;
+                                return 1;
                             }
                             names.insert(rv);
                         }
@@ -640,6 +672,7 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
             }
         }
     }
+    return 0;
 }
 
 pub fn sheet_to_data<'a>(
@@ -647,7 +680,7 @@ pub fn sheet_to_data<'a>(
     sheet_name: &'a String,
     sheet: &'a Range<DataType>,
     export_columns: String,
-) -> SheetData<'a> {
+) -> Result<SheetData<'a>, usize> {
     let mut output_file_name: String = String::new();
     let mut mod_name: String = String::new();
     let mut values: Vec<Vec<&DataType>> = vec![];
@@ -726,7 +759,7 @@ pub fn sheet_to_data<'a>(
                                     "没找到引用的键值!File: {},Sheet: {},Row: {}, Key: {}",
                                     input_file_name, sheet_name, row_num, key
                                 );
-                                panic!("abort")
+                                return Err(1);
                             }
                         }
                     } else {
@@ -736,7 +769,7 @@ pub fn sheet_to_data<'a>(
                                 "没找到引用的键值!File: {},Sheet: {},Row: {}, Key: {}",
                                 input_file_name, sheet_name, row_num, key
                             );
-                            panic!("abort")
+                            return Err(1);
                         }
                     }
                 }
@@ -746,7 +779,7 @@ pub fn sheet_to_data<'a>(
                             "{} 不在枚举类型 {:?} 中! File: [{}],Sheet: [{}], Row: [{}]",
                             value, &enums[i], input_file_name, sheet_name, row_num
                         );
-                        panic!("abort")
+                        return Err(1);
                     }
                 }
                 row_value.push(&row[i]);
@@ -785,10 +818,10 @@ pub fn sheet_to_data<'a>(
         enums: enums,
         force_mods: force_mods,
     };
-    return info;
+    return Ok(info);
 }
 
-pub fn create_pbd_file(out_path: &String) {
+pub fn create_pbd_file(out_path: &String) -> usize {
     let pbds = GLOBAL_PBD.read();
     let keys = pbds.keys();
     let mut sorted_keys: Vec<String> = vec![];
@@ -822,9 +855,10 @@ pub fn create_pbd_file(out_path: &String) {
     }
     let pbd_path = format!("{}/pbd.proto", out_path);
     fs::write(&pbd_path, content).unwrap();
+    return 0;
 }
 
-pub fn create_lang_file(out_path: &String) {
+pub fn create_lang_file(out_path: &String) -> usize {
     let data = GLOBAL_LANG.read();
     let mut sorted_keys: Vec<String> = vec![];
     let mut hash_ids = vec![];
@@ -840,7 +874,7 @@ pub fn create_lang_file(out_path: &String) {
     sheetk.add_column(Column { width: 30.0 });
     sheetk.add_column(Column { width: 80.0 });
 
-    wbk.write_sheet(&mut sheetk, |sheet_writer| {
+    let write_result = wbk.write_sheet(&mut sheetk, |sheet_writer| {
         let sw = sheet_writer;
         sw.append_row(row!["MOD", "Data.LanguageKey", ""])?;
         sw.append_row(row!["BACK_TYPE", "", ""])?;
@@ -853,18 +887,22 @@ pub fn create_lang_file(out_path: &String) {
         for key in &sorted_keys {
             let hash = to_hash_id(key);
             if hash_ids.contains(&hash) {
-                error!("key: {key} 的hash值重复 hash: {hash}")
+                error!("key: {key} 的hash值重复 hash: {hash}");
+                return Err(Error::new(ErrorKind::Other, "key is repeat"));
             } else {
                 hash_ids.push(hash);
             }
             sw.append_row(row!["VALUE", hash.to_string(), key.to_string()])?;
         }
         sw.append_row(row![blank!(3)])
-    })
-    .expect("write Data.LanguageKey excel error!");
+    });
     wbk.close()
         .expect(format!("close {wbk_name} error!").as_str());
 
+    match write_result {
+        Ok(_) => (),
+        Err(_) => return 1,
+    };
     let wbl_name = "D多语言简体中文表.xlsx";
     let mut wbl = Workbook::create(format!("{out_path}/{wbl_name}").as_str());
     let mut sheetl = wbl.create_sheet("sheet1");
@@ -872,7 +910,7 @@ pub fn create_lang_file(out_path: &String) {
     sheetl.add_column(Column { width: 30.0 });
     sheetl.add_column(Column { width: 80.0 });
 
-    wbl.write_sheet(&mut sheetl, |sheet_writer| {
+    let write_result = wbl.write_sheet(&mut sheetl, |sheet_writer| {
         let sw = sheet_writer;
         sw.append_row(row!["MOD", "Data.LanguagezhCN", ""])?;
         sw.append_row(row!["BACK_TYPE", "", ""])?;
@@ -889,10 +927,14 @@ pub fn create_lang_file(out_path: &String) {
             sw.append_row(row!["VALUE", hash.to_string(), val.to_string()])?;
         }
         sw.append_row(row![blank!(3)])
-    })
-    .expect("write Data.LanguagezhCN excel error!");
+    });
     wbl.close()
         .expect(format!("close {wbl_name} error!").as_str());
+    match write_result {
+        Ok(_) => (),
+        Err(_) => return 1,
+    };
+    return 0;
 }
 
 fn cell_to_json(
