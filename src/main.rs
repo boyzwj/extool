@@ -142,15 +142,11 @@ fn gen_from_excel(args: Args) -> usize {
         let result = rc.recv().unwrap();
         err_flag = err_flag + result;
     }
-
-    if err_flag > 0 {
-        pool.clear();
-        pool.close();
-        return 1;
-    }
-
     pool.clear();
     pool.close();
+    if err_flag > 0 {
+        return 1;
+    }
 
     if args.type_input.to_uppercase() == "EXCEL" && args.format.to_uppercase() == "PBD" {
         match excel::create_pbd_file(&args.output_path) {

@@ -24,7 +24,7 @@ fn find_element(
                 _find_package = v[1].to_string();
                 continue;
             } else {
-                error!("proto file={:?} is invalid!", filepath)
+                panic!("proto file={:?} is invalid!", filepath)
             }
         }
 
@@ -71,7 +71,7 @@ pub fn create(files: Vec<String>, out_path: &String, format: &String, type_input
     match format.to_uppercase().as_str() {
         "CS" => data_to_cs(out_path, &elements),
         "LUA" => data_to_lua(out_path, &elements),
-        _ => error!(
+        _ => panic!(
             "type input={:?} and format={} is unsupport!",
             type_input, format
         ),
