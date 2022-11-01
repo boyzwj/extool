@@ -1,6 +1,9 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 
+use inflector::Inflector;
+#[derive(Debug)]
+
 struct Element {
     package: String,
     proto: String,
@@ -34,7 +37,13 @@ fn find_element(
             if head.ends_with("2C") || head.ends_with("2S") {
                 let v2: Vec<&str> = head.split("message").collect();
                 let msg_name = v2[1].trim().to_string();
-                let proto = format!("{}.{}", uppercase_first_letter(&_find_package), msg_name);
+                let temp_proto = format!("{}.{}", &_find_package, msg_name);
+                let arrs: Vec<&str> = temp_proto.split(&['.']).collect();
+                let mut new_arrs: Vec<String> = vec![];
+                for t_str in arrs.into_iter() {
+                    new_arrs.push(uppercase_first_letter(t_str));
+                }
+                let proto = new_arrs.join(".");
                 let digest = md5::compute(&proto);
                 let bytes = format!("{:x}", digest);
                 let k2 = u128::from_str_radix(&bytes, 16).unwrap();
@@ -68,6 +77,7 @@ pub fn create(files: Vec<String>, out_path: &String, format: &String, type_input
     for file in &files {
         find_element(&file, &mut elements).unwrap();
     }
+    elements.sort_by(|a, b| a.proto.cmp(&b.proto));
     match format.to_uppercase().as_str() {
         "CS" => data_to_cs(out_path, &elements),
         "LUA" => data_to_lua(out_path, &elements),
@@ -80,38 +90,28 @@ pub fn create(files: Vec<String>, out_path: &String, format: &String, type_input
 
 fn data_to_cs(out_path: &String, elements: &Vec<Element>) {
     let mut constdef: Vec<String> = vec![];
-    let mut type2id: Vec<String> = vec![];
-    let mut id2parser: Vec<String> = vec![];
-
+    let mut dicid: Vec<String> = vec![];
+    let mut dicparser: Vec<String> = vec![];
     for elem in elements {
-        let const_name = &elem.proto.replace(".", "");
+        let const_name = &elem.proto.to_class_case();
         constdef.push(format!(
             "\t\tpublic const ushort {} = {};",
             const_name, elem.id
         ));
-
-        let const_type2id = format!(
-            "\t\t\tif (type == typeof({}))
-\t\t\t{{
-\t\t\t    return {};
-\t\t\t}} ",
+        dicid.push(format!(
+            "\t\t\t{{typeof({}), {}}},",
             &elem.proto, const_name
-        );
-        type2id.push(const_type2id);
-
-        let const_id2parser = format!(
-            "\t\t\tif (id == {})
-\t\t\t{{
-\t\t\t    return {}.Parser;
-\t\t\t}} ",
+        ));
+        dicparser.push(format!(
+            "\t\t\t{{{},  {}.Parser}},",
             const_name, &elem.proto
-        );
-        id2parser.push(const_id2parser)
+        ));
     }
 
     let out = format!(
         "using System;
 using Google.Protobuf;
+using System.Collections.Generic;
 namespace Script.Network
 {{
     public class PB
@@ -119,25 +119,44 @@ namespace Script.Network
 {}
 
 
-        public static ushort GetCmdID(IMessage obj)
+        private static Dictionary<Type, ushort> _dic_id = new Dictionary<Type, ushort>()
         {{
-            Type type = obj.GetType();
 {}
 
-            return 0;
+        }};
+
+        private static Dictionary<ushort, MessageParser> _dic_parser = new Dictionary<ushort, MessageParser>()
+        {{
+{}
+
+        }};
+        public static ushort GetCmdID(IMessage obj)
+        {{
+          ushort cmd = 0;
+          Type type = obj.GetType();
+          if (_dic_id.TryGetValue(type, out cmd))
+          {{
+            return cmd;
+          }}
+
+          return cmd;
         }}
 
         public static MessageParser GetParser(ushort id)
         {{
-{}
+          MessageParser parser;
+          if (_dic_parser.TryGetValue(id, out parser))
+          {{
+            return parser;
+          }}
 
-            return null;
+          return parser;
         }}
     }}
 }}",
         constdef.join("\n"),
-        type2id.join("\n"),
-        id2parser.join("\n"),
+        dicid.join("\n"),
+        dicparser.join("\n")
     );
     let output_file_name = String::from("PB.cs");
     let path_str = format!("{}/{}", out_path, output_file_name);
