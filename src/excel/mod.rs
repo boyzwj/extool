@@ -513,8 +513,8 @@ impl<'a> SheetData<'_> {
                 } else {
                     let p_val =
                         cell_to_pvalue(fv, &ft, &self.input_file_name, &self.sheet_name, fk);
-                    dm.set_field_by_name(fk, p_val);
                     // println!("ft: {},fk: {},fv: {:?},p_val: {:?}", ft, fk, fv, p_val);
+                    dm.set_field_by_name(fk, p_val);
                 }
             }
             let key_val = dm.get_field_by_name_mut(key_name).unwrap().clone();
@@ -1025,6 +1025,12 @@ fn cell_to_json(
         json!(data)
     } else if row_type == "STRING_LOC" {
         json!(to_hash_id(&s))
+    } else if row_type == "BOOL" {
+        if s == "是" || s.to_uppercase() == "TRUE" {
+            serde_json::Value::Bool(true)
+        } else {
+            serde_json::Value::Bool(false)
+        }
     } else {
         json!(s)
     }
@@ -1067,6 +1073,12 @@ fn cell_to_string(cell: &DataType, row_type: &String, _filename: &String, _key: 
             return "".to_string();
         }
         return format!("{}", to_hash_id(&s));
+    } else if row_type == "BOOL" {
+        if s == "是" || s.to_uppercase() == "TRUE" {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        }
     } else {
         s
     }
@@ -1183,8 +1195,14 @@ fn cell_to_pvalue(
         return PValue::U32(to_hash_id(&s));
     } else if row_type == "STRING" {
         return PValue::String(s);
+    } else if row_type == "BOOL" {
+        if s == "是" || s.to_uppercase() == "TRUE" {
+            return PValue::Bool(true);
+        } else {
+            return PValue::Bool(false);
+        }
     } else {
-        warn!(
+        error!(
             "cell_to_pvalue failed,unsupport front_type [{}]! File: [{}] Key: [{}] Val: [{}]",
             row_type, &filename, &key, &s
         );
@@ -1282,6 +1300,7 @@ fn convert_to_pinyin(
         for option_pinyin in text.to_pinyin() {
             match option_pinyin {
                 Some(pinyin) => {
+                    // let py = pinyin.plain().to_string();
                     let py = pinyin.plain().replace('ü', "v");
                     enum_elems.push(py);
                 }
