@@ -2,6 +2,7 @@ use ahash::{AHashMap, AHashSet};
 use calamine::{open_workbook, DataType, Range, Reader, Xlsx};
 use indexmap::IndexMap;
 use inflector::Inflector;
+use pinyin::ToPinyin;
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage};
 use prost_reflect::{MapKey, Value as PValue};
@@ -15,6 +16,7 @@ use std::io::{BufWriter, Write};
 use std::io::{Error, ErrorKind};
 use std::string::String;
 use std::{env, fs};
+
 #[dynamic]
 static mut GLOBAL_IDS: AHashSet<String> = AHashSet::new();
 
@@ -355,6 +357,7 @@ impl<'a> SheetData<'_> {
                     "LIST_FLOAT" => "repeated float".to_string(),
                     "LIST_STRING" => "repeated string".to_string(),
                     "ENUM" => "uint32".to_string(),
+                    // "ENUM" => convert_enum_type(fk),
                     "STRING_LOC" => "uint32".to_string(),
                     _ => ft.to_lowercase(),
                 };
@@ -390,13 +393,51 @@ impl<'a> SheetData<'_> {
             class_name = self.force_mods[1].to_string();
         }
 
+        let mut enum_msgs = vec![];
+        for y in 0..valid_columns.len() {
+            let i = valid_columns[y];
+            let ft = &valid_front_types[y];
+            if ft == "ENUM" {
+                match convert_to_pinyin(&self.enums[i]) {
+                    Ok(arr) => {
+                        let mut enum_schemas = vec![];
+                        let fk = self.names[i].to_lowercase();
+                        for (k, v, comment) in arr {
+                            enum_schemas.push(format!("\t\t{}_{} = {};//{}", fk, v, k, comment))
+                        }
+                        let msg_enum = format!(
+                            "\tenum {}
+    {{\n\
+                            {}\n\
+                            \t}}",
+                            convert_enum_type(&self.names[i]),
+                            enum_schemas.join("\n")
+                        );
+                        enum_msgs.push(msg_enum)
+                    }
+                    Err(txt) => {
+                        error!(
+                            "Enum的值[{}]只能纯汉字或者纯英文  File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
+                            txt, &self.input_file_name, &self.sheet_name, &self.mod_name,  &self.names[i], ft
+                        );
+                        return Err(1);
+                    }
+                }
+            }
+        }
+
+        // let msg_enum = format!("{}", "");
+
         let msg_schema = format!(
             "message {}{{\n\
             {}\n\
+            {}\n\
             }}",
             class_name,
-            field_schemas.join("\n")
+            field_schemas.join("\n"),
+            enum_msgs.join("\n")
         );
+
         let out = format!(
             "message Data{}{{\n\
              \tmap<{},{}> data = 1;\n\
@@ -1159,14 +1200,14 @@ fn parse_err(filename: &String, key: &String, s: &String, sheetname: &String) ->
     return error;
 }
 
-fn get_module_name(fname: String) -> String {
-    let a = fname
-        .replace(".ex", "")
-        .as_str()
-        .to_train_case()
-        .replace("-", ".");
-    return a;
-}
+// fn get_module_name(fname: String) -> String {
+//     let a = fname
+//         .replace(".ex", "")
+//         .as_str()
+//         .to_train_case()
+//         .replace("-", ".");
+//     return a;
+// }
 fn get_real_front_type(ref_name: &String, origin_type: &String, is_enum: bool) -> String {
     if is_enum {
         return "ENUM".to_string();
@@ -1222,4 +1263,41 @@ fn get_real_back_type(ref_name: &String, origin_type: &String, is_enum: bool) ->
 fn to_hash_id(key: &String) -> u32 {
     let digest = md5::compute(key);
     return (u128::from_str_radix(&format!("{:x}", digest), 16).unwrap() % 4294967296) as u32;
+}
+
+fn convert_enum_type(field_name: &String) -> String {
+    return field_name.to_class_case();
+}
+
+// input: {"是": 1, "否": 0}
+// output: {0: "shi", 1: "fou"}
+fn convert_to_pinyin(
+    enum_keys: &AHashMap<String, usize>,
+) -> Result<Vec<(usize, String, String)>, String> {
+    let mut arr: Vec<(usize, String, String)> = vec![];
+    for (k, i) in enum_keys {
+        let text = k.as_str();
+        let mut enum_elems: Vec<&str> = vec![];
+        let mut is_pure_hanzi = true;
+        for option_pinyin in text.to_pinyin() {
+            match option_pinyin {
+                Some(pinyin) => {
+                    enum_elems.push(pinyin.plain());
+                }
+                None => {
+                    is_pure_hanzi = false;
+                }
+            }
+        }
+        if is_pure_hanzi == false {
+            if !enum_elems.is_empty() {
+                return Err(text.to_string());
+            }
+            enum_elems.push(text);
+        }
+        let temp = enum_elems.join("_");
+        arr.push((*i, temp, k.to_string()));
+    }
+    arr.sort();
+    return Ok(arr);
 }

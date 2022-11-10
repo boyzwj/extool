@@ -305,6 +305,7 @@ dependencies = [
  "log",
  "md5",
  "num_cpus",
+ "pinyin",
  "prost",
  "prost-reflect 0.8.1 (git+https://github.com/slientgoat/prost-reflect?tag=0.8.2)",
  "prost-reflect-build",
@@ -602,6 +603,12 @@ dependencies = [
  "fixedbitset",
  "indexmap",
 ]
+
+[[package]]
+name = "pinyin"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bd12336e3afa34152e002f57df37a7056778daa59ea542b3473b87f5fb260c4"
 
 [[package]]
 name = "proc-macro-error"

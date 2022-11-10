@@ -7,6 +7,7 @@ extern crate inflector;
 
 #[macro_use]
 extern crate log;
+extern crate pinyin;
 
 extern crate indexmap;
 extern crate num_cpus;
