@@ -1277,12 +1277,13 @@ fn convert_to_pinyin(
     let mut arr: Vec<(usize, String, String)> = vec![];
     for (k, i) in enum_keys {
         let text = k.as_str();
-        let mut enum_elems: Vec<&str> = vec![];
+        let mut enum_elems: Vec<String> = vec![];
         let mut is_pure_hanzi = true;
         for option_pinyin in text.to_pinyin() {
             match option_pinyin {
                 Some(pinyin) => {
-                    enum_elems.push(pinyin.plain());
+                    let py = pinyin.plain().replace('ü', "v");
+                    enum_elems.push(py);
                 }
                 None => {
                     is_pure_hanzi = false;
@@ -1293,7 +1294,7 @@ fn convert_to_pinyin(
             if !enum_elems.is_empty() {
                 return Err(text.to_string());
             }
-            enum_elems.push(text);
+            enum_elems.push(k.to_string());
         }
         let temp = enum_elems.join("_");
         arr.push((*i, temp, k.to_string()));
