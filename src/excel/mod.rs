@@ -34,6 +34,9 @@ static mut GLOBAL_LANG: AHashMap<String, String> = AHashMap::new();
 #[dynamic]
 static mut GLOBAL_EXCLUDE_SHEETS: AHashSet<String> = AHashSet::new();
 
+#[dynamic]
+static mut GLOBAL_MODS: AHashSet<String> = AHashSet::new();
+
 // static mut
 pub struct SheetData<'a> {
     input_file_name: String,
@@ -632,6 +635,15 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
                         GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path);
                         break;
                     }
+                    if GLOBAL_MODS.read().contains(&mod_name) {
+                        error!(
+                            "配置了重复的MOD!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} \n",
+                            &input_file_name, &sheet, &mod_name, row_num
+                        );
+                        return 1;
+                    } else {
+                        GLOBAL_MODS.write().insert(mod_name.to_string());
+                    }
                 } else if st == "VALUE" {
                     let key = format!("{}:{}", mod_name, row[1].to_string().trim().to_string());
                     if GLOBAL_IDS.read().contains(&key) {
@@ -763,7 +775,7 @@ pub fn sheet_to_data<'a>(
             }
         } else if st == "DES" {
             for v in row {
-                describes.push(v.to_string().trim().to_string());
+                describes.push(v.to_string().trim().replace('\n', ""));
             }
         } else if st == "ENUM" {
             for v in row {
@@ -844,6 +856,14 @@ pub fn sheet_to_data<'a>(
         types = temp_types;
     } else if export_columns == "BACK" {
         types = back_types;
+    }
+
+    if enums.is_empty() {
+        enums = vec![AHashMap::new(); types.len()];
+    }
+
+    if refs.is_empty() {
+        refs = vec![String::new(); types.len()];
     }
 
     let info: SheetData = SheetData {
