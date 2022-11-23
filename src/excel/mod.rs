@@ -50,6 +50,7 @@ pub struct SheetData<'a> {
     enums: Vec<AHashMap<String, usize>>,
     values: Vec<Vec<&'a DataType>>,
     force_mods: Vec<String>,
+    export_columns: String,
 }
 
 impl<'a> SheetData<'_> {
@@ -97,6 +98,8 @@ impl<'a> SheetData<'_> {
     }
 
     pub fn data_to_json(&self, out_path: &String) -> Result<usize, usize> {
+        let file_name = &self.output_file_name;
+        let export_columns = &self.export_columns;
         let mut res: Map<String, Value> = Map::new();
         for rv in &self.values {
             let mut map: Map<String, Value> = Map::new();
@@ -106,11 +109,11 @@ impl<'a> SheetData<'_> {
                     let origin_type = &self.types[i];
                     let ref_name = &self.refs[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
-                        let real_type = &get_real_front_type(ref_name, origin_type, false);
+                        let real_type = get_real_type(export_columns, ref_name, origin_type, false);
                         let value = cell_to_json(
                             &rv[i],
                             &real_type,
-                            &self.output_file_name,
+                            file_name,
                             &column_name,
                             &self.sheet_name,
                         );
@@ -145,12 +148,12 @@ impl<'a> SheetData<'_> {
             }
         }
 
-        if self.values.len() == 0 || self.output_file_name.len() <= 0 {
+        if self.values.len() == 0 || file_name.len() <= 0 {
             return Ok(0);
         }
         let obj = json!(res);
         let json = serde_json::to_string_pretty(&obj).unwrap();
-        let path_str = format!("{}/{}.json", out_path, self.output_file_name);
+        let path_str = format!("{}/{}.json", out_path, file_name);
         match self.write_file(&path_str, &json) {
             0 => (),
             _ => return Err(1),
@@ -159,6 +162,8 @@ impl<'a> SheetData<'_> {
     }
 
     pub fn data_to_lua(&self, out_path: &String) -> Result<usize, usize> {
+        let file_name = &self.output_file_name;
+        let export_columns = &self.export_columns;
         let mut res: Vec<String> = vec![];
         let mut kns: Vec<String> = vec![];
         let mut j = 1;
@@ -177,9 +182,9 @@ impl<'a> SheetData<'_> {
                     let origin_type = &self.types[i];
                     // let dic = &self.enums[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
-                        let real_type = &get_real_front_type(&self.refs[i], origin_type, false);
-                        let value =
-                            cell_to_string(&rv[i], real_type, &self.output_file_name, &column_name);
+                        let real_type =
+                            get_real_type(export_columns, &self.refs[i], origin_type, false);
+                        let value = cell_to_string(&rv[i], &real_type, file_name, &column_name);
                         columns.push(format!("{}", value.replace("[", "{").replace("]", "}")));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
@@ -200,12 +205,8 @@ impl<'a> SheetData<'_> {
             }
             if columns.len() > 0 {
                 let key_is_enum = self.enums[1].is_empty() == false;
-                let mut keyvalue = cell_to_string(
-                    &rv[1],
-                    &self.types[1],
-                    &self.output_file_name,
-                    &self.names[1],
-                );
+                let mut keyvalue =
+                    cell_to_string(&rv[1], &self.types[1], file_name, &self.names[1]);
                 if key_is_enum {
                     let enum_value = &rv[1].to_string().trim().to_string();
                     keyvalue = self.enums[1].get(enum_value).unwrap().to_string();
@@ -215,7 +216,7 @@ impl<'a> SheetData<'_> {
             }
         }
 
-        if self.values.len() == 0 || self.output_file_name.len() <= 0 {
+        if self.values.len() == 0 || file_name.len() <= 0 {
             return Ok(0);
         }
         let out = format!(
@@ -243,7 +244,7 @@ impl<'a> SheetData<'_> {
             kns.join(","),
             res.join(",\n"),
         );
-        let path_str = format!("{}/{}.lua", out_path, self.output_file_name);
+        let path_str = format!("{}/{}.lua", out_path, file_name);
         match self.write_file(&path_str, &out) {
             0 => (),
             _ => return Err(1),
@@ -252,6 +253,8 @@ impl<'a> SheetData<'_> {
     }
 
     pub fn data_to_ex(&self, dst_path: &String) -> Result<usize, usize> {
+        let file_name = &self.output_file_name;
+        let export_columns = &self.export_columns;
         let mut res: Vec<String> = vec![];
         let mut ids: Vec<String> = vec![];
         for rv in &self.values {
@@ -261,10 +264,9 @@ impl<'a> SheetData<'_> {
                     let column_name = &self.names[i];
                     let origin_type = &self.types[i];
                     if self.enums.len() == 0 || self.enums[i].len() == 0 {
-                        let real_type = &get_real_back_type(&self.refs[i], origin_type, false);
-
-                        let value =
-                            cell_to_string(&rv[i], real_type, &self.output_file_name, &column_name);
+                        let real_type =
+                            get_real_type(export_columns, &self.refs[i], origin_type, false);
+                        let value = cell_to_string(&rv[i], &real_type, file_name, &column_name);
                         columns.push(format!("\t\t\t{}: {}", column_name, value));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
@@ -285,12 +287,8 @@ impl<'a> SheetData<'_> {
             }
             if columns.len() > 0 {
                 let key_is_enum = self.enums[1].is_empty() == false;
-                let mut keyvalue = cell_to_string(
-                    &rv[1],
-                    &self.types[1],
-                    &self.output_file_name,
-                    &self.names[1],
-                );
+                let mut keyvalue =
+                    cell_to_string(&rv[1], &self.types[1], file_name, &self.names[1]);
                 if key_is_enum {
                     let enum_value = &rv[1].to_string().trim().to_string();
                     keyvalue = self.enums[1].get(enum_value).unwrap().to_string();
@@ -305,7 +303,7 @@ impl<'a> SheetData<'_> {
             }
         }
 
-        if self.values.len() == 0 || self.output_file_name.len() <= 0 {
+        if self.values.len() == 0 || file_name.len() <= 0 {
             return Ok(0);
         }
         let module_name = self.mod_name.clone();
@@ -327,7 +325,7 @@ impl<'a> SheetData<'_> {
             ids.join(", "),
             res.join("\n")
         );
-        let path_str = format!("{}/{}.ex", dst_path, self.output_file_name);
+        let path_str = format!("{}/{}.ex", dst_path, file_name);
         match self.write_file(&path_str, &out) {
             0 => (),
             _ => return Err(1),
@@ -339,6 +337,7 @@ impl<'a> SheetData<'_> {
         if self.mod_name == "" {
             return Ok(0);
         }
+        let export_columns = &self.export_columns;
         let mut field_schemas: Vec<String> = vec![];
         let msg_name = self.mod_name.to_string().replace("Data.", "");
         let mut n = 1;
@@ -351,7 +350,7 @@ impl<'a> SheetData<'_> {
             let is_enum = self.enums[i].is_empty() == false;
             let ref_name = &self.refs[i];
             if origin_type != "" && fk != "" {
-                let ft = get_real_front_type(ref_name, origin_type, is_enum);
+                let ft = get_real_type(export_columns, ref_name, origin_type, is_enum);
                 let field_schema = match ft.as_str() {
                     "LIST_UINT32" => "repeated uint32".to_string(),
                     "LIST_UINT64" => "repeated uint64".to_string(),
@@ -878,6 +877,7 @@ pub fn sheet_to_data<'a>(
         describes: describes,
         enums: enums,
         force_mods: force_mods,
+        export_columns: export_columns,
     };
     return Ok(info);
 }
@@ -1246,22 +1246,17 @@ fn parse_err(filename: &String, key: &String, s: &String, sheetname: &String) ->
 //         .replace("-", ".");
 //     return a;
 // }
-fn get_real_front_type(ref_name: &String, origin_type: &String, is_enum: bool) -> String {
+fn get_real_type(
+    export_columns: &String,
+    ref_name: &String,
+    origin_type: &String,
+    is_enum: bool,
+) -> String {
     if is_enum {
         return "ENUM".to_string();
     }
     if !ref_name.trim().is_empty() {
-        if let Some(ref_primary_type) = GLOBAL_FRONT_PRIMARYS.read().get(ref_name) {
-            if origin_type.contains("LIST") {
-                if origin_type == "INT" {
-                    "LIST_UINT32".to_string();
-                } else {
-                    return format!("LIST_{}", ref_primary_type);
-                }
-            } else {
-                return ref_primary_type.to_string();
-            }
-        }
+        return get_ref_primary_type(export_columns, ref_name, origin_type);
     }
     if origin_type == "LIST_INT" || origin_type == "LIST" {
         return "LIST_UINT32".to_string();
@@ -1272,30 +1267,42 @@ fn get_real_front_type(ref_name: &String, origin_type: &String, is_enum: bool) -
     }
 }
 
-fn get_real_back_type(ref_name: &String, origin_type: &String, is_enum: bool) -> String {
-    if is_enum {
-        return "ENUM".to_string();
-    }
-    if !ref_name.trim().is_empty() {
-        if let Some(ref_primary_type) = GLOBAL_BACK_PRIMARYS.read().get(ref_name) {
-            if origin_type.contains("LIST") {
-                if origin_type == "INT" {
-                    "LIST_UINT32".to_string();
+fn get_ref_primary_type(
+    export_columns: &String,
+    ref_name: &String,
+    origin_type: &String,
+) -> String {
+    match export_columns.as_str() {
+        "BACK" => {
+            if let Some(ref_primary_type) = GLOBAL_BACK_PRIMARYS.read().get(ref_name) {
+                if origin_type.contains("LIST") {
+                    if origin_type == "INT" {
+                        return "LIST_UINT32".to_string();
+                    } else {
+                        return format!("LIST_{}", ref_primary_type);
+                    }
                 } else {
-                    return format!("LIST_{}", ref_primary_type);
+                    return ref_primary_type.to_string();
                 }
-            } else {
-                return ref_primary_type.to_string();
             }
+            return origin_type.to_string();
         }
-    }
-    if origin_type == "LIST_INT" || origin_type == "LIST" {
-        return "LIST_UINT32".to_string();
-    } else if origin_type == "INT" {
-        return "UINT32".to_string();
-    } else {
-        return origin_type.to_string();
-    }
+        "FRONT" => {
+            if let Some(ref_primary_type) = GLOBAL_FRONT_PRIMARYS.read().get(ref_name) {
+                if origin_type.contains("LIST") {
+                    if origin_type == "INT" {
+                        return "LIST_UINT32".to_string();
+                    } else {
+                        return format!("LIST_{}", ref_primary_type);
+                    }
+                } else {
+                    return ref_primary_type.to_string();
+                }
+            }
+            return origin_type.to_string();
+        }
+        _ => return origin_type.to_string(),
+    };
 }
 
 fn to_hash_id(key: &String) -> u32 {
