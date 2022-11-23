@@ -51,6 +51,9 @@ pub struct SheetData<'a> {
     values: Vec<Vec<&'a DataType>>,
     force_mods: Vec<String>,
     export_columns: String,
+    valid_columns: Vec<usize>,
+    valid_front_types: Vec<String>,
+    valid_enums: AHashMap<usize, Vec<(usize, String, String)>>,
 }
 
 impl<'a> SheetData<'_> {
@@ -255,6 +258,7 @@ impl<'a> SheetData<'_> {
     pub fn data_to_ex(&self, dst_path: &String) -> Result<usize, usize> {
         let file_name = &self.output_file_name;
         let export_columns = &self.export_columns;
+        let valid_enums = &self.valid_enums;
         let mut res: Vec<String> = vec![];
         let mut ids: Vec<String> = vec![];
         for rv in &self.values {
@@ -295,7 +299,11 @@ impl<'a> SheetData<'_> {
                 }
 
                 res.push(format!(
-                    "\tdef get({}) do\n\t\t%{{\n{}\n\t\t}}\n\tend\n",
+                    "  def get({}) do
+    %{{
+{}
+    }}
+  end",
                     keyvalue,
                     columns.join(",\n")
                 ));
@@ -307,23 +315,48 @@ impl<'a> SheetData<'_> {
             return Ok(0);
         }
         let module_name = self.mod_name.clone();
+
+        let mut enum_mods: Vec<String> = vec![];
+        for i in valid_enums.keys() {
+            let mut schema_fields: Vec<String> = vec![];
+            let fk = &self.names[*i].to_class_case();
+            for (k, v, _comment) in valid_enums.get(i).unwrap() {
+                schema_fields.push(format!("    value({}, {})", v.to_class_case(), k));
+            }
+            let enum_mod = format!(
+                "  defenum {} do
+{}
+  end",
+                fk,
+                schema_fields.join("\n")
+            );
+            enum_mods.push(enum_mod);
+        }
+        if !enum_mods.is_empty() {
+            enum_mods.insert(0, "  use EnumType".to_string())
+        }
         let out = format!(
-            "defmodule {} do\n\
-             \t## SOURCE:\"{}\" SHEET:\"{}\"\n\n\
-             \tdef ids() do\n\
-             \t\t[{}]\n\
-             \tend\n\n\
-             \tdef all(), do: for id <- ids(), do: get(id)\n\n\
-             \tdef query(q), do: for data <- all(), q.(data), do: data\n\
-             \n\
-             {}\n\
-             \tdef get(_), do: nil\n\
-             end",
+            "defmodule {} do
+  ## SOURCE:\"{}\" SHEET:\"{}\"
+{}
+
+  def ids() do
+    [{}]
+  end
+
+  def all(), do: for id <- ids(), do: get(id)
+  def query(q), do: for data <- all(), q.(data), do: data
+
+{}
+  
+  def get(_), do: nil\n\
+end",
             module_name,
             self.input_file_name,
             self.sheet_name,
+            enum_mods.join("\n\n"),
             ids.join(", "),
-            res.join("\n")
+            res.join("\n\n")
         );
         let path_str = format!("{}/{}.ex", dst_path, file_name);
         match self.write_file(&path_str, &out) {
@@ -337,41 +370,11 @@ impl<'a> SheetData<'_> {
         if self.mod_name == "" {
             return Ok(0);
         }
-        let export_columns = &self.export_columns;
-        let mut field_schemas: Vec<String> = vec![];
-        let msg_name = self.mod_name.to_string().replace("Data.", "");
-        let mut n = 1;
-        let mut valid_columns: Vec<usize> = vec![];
-        let mut valid_front_types: Vec<String> = vec![];
-        for i in 1..self.types.len() {
-            let origin_type = &self.types[i];
-            let fk = &self.names[i];
-            let des = &self.describes[i];
-            let is_enum = self.enums[i].is_empty() == false;
-            let ref_name = &self.refs[i];
-            if origin_type != "" && fk != "" {
-                let ft = get_real_type(export_columns, ref_name, origin_type, is_enum);
-                let field_schema = match ft.as_str() {
-                    "LIST_UINT32" => "repeated uint32".to_string(),
-                    "LIST_UINT64" => "repeated uint64".to_string(),
-                    "LIST_INT32" => "repeated int32".to_string(),
-                    "LIST_INT64" => "repeated int64".to_string(),
-                    "LIST_FLOAT" => "repeated float".to_string(),
-                    "LIST_STRING" => "repeated string".to_string(),
-                    "ENUM" => "uint32".to_string(),
-                    // "ENUM" => convert_enum_type(fk),
-                    "STRING_LOC" => "uint32".to_string(),
-                    _ => ft.to_lowercase(),
-                };
-                field_schemas.push(format!("\t{} {} = {}; //{}", &field_schema, fk, n, des));
-                valid_columns.push(i);
-                valid_front_types.push(ft);
-                n = n + 1;
-            }
-        }
-        if field_schemas.len() == 0 {
+        let valid_columns = &self.valid_columns;
+        if valid_columns.len() == 0 {
             return Ok(0);
         }
+        let valid_front_types = &self.valid_front_types;
 
         let key_name = &self.names[valid_columns[0]];
         if valid_front_types[0].contains("LIST") || valid_front_types[0] == "FLOAT" {
@@ -390,55 +393,14 @@ impl<'a> SheetData<'_> {
             map_key_type = "UINT32".to_string();
         }
 
+        let msg_name = self.mod_name.to_string().replace("Data.", "");
         let mut class_name = msg_name.to_string();
         if self.force_mods.len() > 0 && !self.force_mods[1].is_empty() {
             class_name = self.force_mods[1].to_string();
         }
 
-        let mut enum_msgs = vec![];
-        for y in 0..valid_columns.len() {
-            let i = valid_columns[y];
-            let ft = &valid_front_types[y];
-            if ft == "ENUM" {
-                match convert_to_pinyin(&self.enums[i]) {
-                    Ok(arr) => {
-                        let mut enum_schemas = vec![];
-                        let fk = self.names[i].to_lowercase();
-                        for (k, v, comment) in arr {
-                            enum_schemas.push(format!("\t\t{}_{} = {};//{}", fk, v, k, comment))
-                        }
-                        let msg_enum = format!(
-                            "\tenum {}
-    {{\n\
-                            {}\n\
-                            \t}}",
-                            convert_enum_type(&self.names[i]),
-                            enum_schemas.join("\n")
-                        );
-                        enum_msgs.push(msg_enum)
-                    }
-                    Err(txt) => {
-                        error!(
-                            "Enum的值[{}]只能纯汉字或者纯英文  File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
-                            txt, &self.input_file_name, &self.sheet_name, &self.mod_name,  &self.names[i], ft
-                        );
-                        return Err(1);
-                    }
-                }
-            }
-        }
-
         // let msg_enum = format!("{}", "");
-
-        let msg_schema = format!(
-            "message {}{{\n\
-            {}\n\
-            {}\n\
-            }}",
-            class_name,
-            field_schemas.join("\n"),
-            enum_msgs.join("\n")
-        );
+        let msg_schema = self.pbd_msg_schema(&class_name);
 
         let out = format!(
             "message Data{}{{\n\
@@ -566,6 +528,68 @@ impl<'a> SheetData<'_> {
             }
         }
         return Ok(0);
+    }
+
+    fn pbd_msg_schema(&self, class_name: &String) -> String {
+        let valid_columns = &self.valid_columns;
+        let valid_front_types = &self.valid_front_types;
+        let names = &self.names;
+        let describes = &self.describes;
+        let valid_enums = &self.valid_enums;
+        let mut field_schemas: Vec<String> = vec![];
+        for y in 0..valid_columns.len() {
+            let i = valid_columns[y];
+            let ft = valid_front_types[y].to_string();
+            let fk = names[i].to_string();
+            let des = describes[i].to_string();
+            let field_schema = match ft.as_str() {
+                "LIST_UINT32" => "repeated uint32".to_string(),
+                "LIST_UINT64" => "repeated uint64".to_string(),
+                "LIST_INT32" => "repeated int32".to_string(),
+                "LIST_INT64" => "repeated int64".to_string(),
+                "LIST_FLOAT" => "repeated float".to_string(),
+                "LIST_STRING" => "repeated string".to_string(),
+                "ENUM" => "uint32".to_string(),
+                "STRING_LOC" => "uint32".to_string(),
+                _ => ft.to_lowercase(),
+            };
+            field_schemas.push(format!("\t{} {} = {}; //{}", &field_schema, fk, y + 1, des));
+        }
+
+        let mut enum_msgs = vec![];
+        let mut sorted_enum_keys = vec![];
+
+        for i in valid_enums.keys() {
+            sorted_enum_keys.push(i);
+        }
+        sorted_enum_keys.sort();
+        for i in sorted_enum_keys {
+            let arr = valid_enums.get(i).unwrap();
+            let mut enum_schemas = vec![];
+            let fk = names[*i].to_lowercase();
+            for (k, v, comment) in arr {
+                enum_schemas.push(format!("\t\t{}_{} = {};//{}", fk, v, k, comment))
+            }
+            let msg_enum = format!(
+                "\tenum {}
+    {{\n\
+                {}\n\
+                \t}}",
+                convert_enum_type(&names[*i]),
+                enum_schemas.join("\n")
+            );
+            enum_msgs.push(msg_enum)
+        }
+
+        return format!(
+            "message {}{{\n\
+            {}\n\
+            {}\n\
+            }}",
+            class_name,
+            field_schemas.join("\n"),
+            enum_msgs.join("\n")
+        );
     }
 }
 
@@ -865,6 +889,39 @@ pub fn sheet_to_data<'a>(
         refs = vec![String::new(); types.len()];
     }
 
+    let mut valid_columns: Vec<usize> = vec![];
+    let mut valid_front_types: Vec<String> = vec![];
+    let mut valid_enums: AHashMap<usize, Vec<(usize, String, String)>> = AHashMap::new();
+    for i in 1..types.len() {
+        let origin_type = &types[i];
+        let fk = &names[i];
+        if origin_type == "" || fk == "" {
+            continue;
+        }
+        let is_enum = enums[i].is_empty() == false;
+        let ref_name = &refs[i];
+        let ft = get_real_type(&export_columns, ref_name, &origin_type, is_enum);
+        valid_front_types.push(ft);
+        valid_columns.push(i);
+    }
+
+    for y in 0..valid_columns.len() {
+        let i = valid_columns[y];
+        let ft = &valid_front_types[y];
+        if ft == "ENUM" {
+            match convert_to_pinyin(&enums[i]) {
+                Ok(arr) => valid_enums.insert(i, arr),
+                Err(txt) => {
+                    error!(
+                        "Enum的值[{}]只能纯汉字或者纯英文  File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
+                        txt, input_file_name, sheet_name, mod_name,  names[i], ft
+                    );
+                    return Err(1);
+                }
+            };
+        }
+    }
+
     let info: SheetData = SheetData {
         input_file_name: input_file_name,
         output_file_name: output_file_name,
@@ -878,6 +935,9 @@ pub fn sheet_to_data<'a>(
         enums: enums,
         force_mods: force_mods,
         export_columns: export_columns,
+        valid_columns,
+        valid_front_types,
+        valid_enums,
     };
     return Ok(info);
 }
