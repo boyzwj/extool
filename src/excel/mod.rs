@@ -54,6 +54,7 @@ pub struct SheetData<'a> {
     valid_columns: Vec<usize>,
     valid_front_types: Vec<String>,
     valid_enums: AHashMap<usize, Vec<(usize, String, String)>>,
+    sorted_enum_keys: Vec<usize>,
 }
 
 impl<'a> SheetData<'_> {
@@ -259,6 +260,7 @@ impl<'a> SheetData<'_> {
         let file_name = &self.output_file_name;
         let export_columns = &self.export_columns;
         let valid_enums = &self.valid_enums;
+        let sorted_enum_keys = &self.sorted_enum_keys;
         let mut res: Vec<String> = vec![];
         let mut ids: Vec<String> = vec![];
         for rv in &self.values {
@@ -317,7 +319,7 @@ impl<'a> SheetData<'_> {
         let module_name = self.mod_name.clone();
 
         let mut enum_mods: Vec<String> = vec![];
-        for i in valid_enums.keys() {
+        for i in sorted_enum_keys {
             let mut schema_fields: Vec<String> = vec![];
             let fk = &self.names[*i].to_class_case();
             for (k, v, _comment) in valid_enums.get(i).unwrap() {
@@ -536,6 +538,7 @@ end",
         let names = &self.names;
         let describes = &self.describes;
         let valid_enums = &self.valid_enums;
+        let sorted_enum_keys = &self.sorted_enum_keys;
         let mut field_schemas: Vec<String> = vec![];
         for y in 0..valid_columns.len() {
             let i = valid_columns[y];
@@ -557,12 +560,6 @@ end",
         }
 
         let mut enum_msgs = vec![];
-        let mut sorted_enum_keys = vec![];
-
-        for i in valid_enums.keys() {
-            sorted_enum_keys.push(i);
-        }
-        sorted_enum_keys.sort();
         for i in sorted_enum_keys {
             let arr = valid_enums.get(i).unwrap();
             let mut enum_schemas = vec![];
@@ -922,6 +919,13 @@ pub fn sheet_to_data<'a>(
         }
     }
 
+    let mut sorted_enum_keys = vec![];
+
+    for i in valid_enums.keys() {
+        sorted_enum_keys.push(*i);
+    }
+    sorted_enum_keys.sort();
+
     let info: SheetData = SheetData {
         input_file_name: input_file_name,
         output_file_name: output_file_name,
@@ -938,6 +942,7 @@ pub fn sheet_to_data<'a>(
         valid_columns,
         valid_front_types,
         valid_enums,
+        sorted_enum_keys,
     };
     return Ok(info);
 }
