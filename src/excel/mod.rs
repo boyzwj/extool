@@ -568,7 +568,7 @@ end",
                 enum_schemas.push(format!("\t\t{}_{} = {};//{}", fk, v, k, comment))
             }
             let msg_enum = format!(
-                "\tenum {}
+                "\tenum Enum{}
     {{\n\
                 {}\n\
                 \t}}",
@@ -895,7 +895,7 @@ pub fn sheet_to_data<'a>(
         if origin_type == "" || fk == "" {
             continue;
         }
-        let is_enum = enums[i].is_empty() == false;
+        let is_enum = origin_type != "BOOL" && !enums[i].is_empty();
         let ref_name = &refs[i];
         let ft = get_real_type(&export_columns, ref_name, &origin_type, is_enum);
         valid_front_types.push(ft);
