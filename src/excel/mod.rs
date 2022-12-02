@@ -273,11 +273,11 @@ impl<'a> SheetData<'_> {
                         let real_type =
                             get_real_type(export_columns, &self.refs[i], origin_type, false);
                         let value = cell_to_string(&rv[i], &real_type, file_name, &column_name);
-                        columns.push(format!("\t\t\t{}: {}", column_name, value));
+                        columns.push(format!("\t\t\t{}: {}", column_name.to_lowercase(), value));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
                         if let Some(x) = &self.enums[i].get(value) {
-                            columns.push(format!("\t\t\t{}: {}", column_name, x));
+                            columns.push(format!("\t\t\t{}: {}", column_name.to_lowercase(), x));
                         } else {
                             error!(
                                 "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {:?} 中",
