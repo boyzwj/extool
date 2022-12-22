@@ -124,7 +124,9 @@ impl<'a> SheetData<'_> {
                         map.insert(column_name.to_string(), value);
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
-                        if let Some(x) = &self.enums[i].get(value) {
+                        if is_enum_none(value) {
+                            map.insert(column_name.to_string(), json!(0));
+                        } else if let Some(x) = &self.enums[i].get(value) {
                             map.insert(column_name.to_string(), json!(x));
                         } else {
                             error!(
@@ -192,7 +194,9 @@ impl<'a> SheetData<'_> {
                         columns.push(format!("{}", value.replace("[", "{").replace("]", "}")));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
-                        if let Some(x) = &self.enums[i].get(value) {
+                        if is_enum_none(value) {
+                            columns.push(format!("{}", 0));
+                        } else if let Some(x) = &self.enums[i].get(value) {
                             columns.push(format!("{}", x));
                         } else {
                             error!(
@@ -276,7 +280,9 @@ impl<'a> SheetData<'_> {
                         columns.push(format!("\t\t\t{}: {}", column_name.to_lowercase(), value));
                     } else {
                         let value = &rv[i].to_string().trim().to_string();
-                        if let Some(x) = &self.enums[i].get(value) {
+                        if is_enum_none(value) {
+                            columns.push(format!("\t\t\t{}: {}", column_name.to_lowercase(), 0));
+                        } else if let Some(x) = &self.enums[i].get(value) {
                             columns.push(format!("\t\t\t{}: {}", column_name.to_lowercase(), x));
                         } else {
                             error!(
@@ -322,6 +328,7 @@ impl<'a> SheetData<'_> {
         for i in sorted_enum_keys {
             let mut schema_fields: Vec<String> = vec![];
             let fk = &self.names[*i].to_class_case();
+            schema_fields.push(format!("    value({}, {})", "None", 0));
             for (k, v, _comment) in valid_enums.get(i).unwrap() {
                 schema_fields.push(format!("    value({}, {})", v.to_class_case(), k));
             }
@@ -464,7 +471,9 @@ end",
                 let fv = self.values[x][i];
                 let enu_val = &fv.to_string().trim().to_string();
                 if ft == "ENUM" {
-                    if let Some(x) = self.enums[i].get(enu_val) {
+                    if enu_val == "0" || enu_val.trim().is_empty() {
+                        dm.set_field_by_name(fk, PValue::U32(0 as u32));
+                    } else if let Some(x) = self.enums[i].get(enu_val) {
                         dm.set_field_by_name(fk, PValue::U32(*x as u32));
                     } else {
                         error!(
@@ -564,6 +573,7 @@ end",
             let arr = valid_enums.get(i).unwrap();
             let mut enum_schemas = vec![];
             let fk = names[*i].to_lowercase();
+            enum_schemas.push(format!("\t\t{}_{} = {};//{}", fk, "None", 0, "空"));
             for (k, v, comment) in arr {
                 enum_schemas.push(format!("\t\t{}_{} = {};//{}", fk, v, k, comment))
             }
@@ -806,7 +816,7 @@ pub fn sheet_to_data<'a>(
                 } else {
                     let words: Vec<&str> = enum_words.split('|').collect();
                     for i in 0..words.len() {
-                        dic.insert(words[i].to_string(), i);
+                        dic.insert(words[i].to_string(), i + 1);
                     }
                     enums.push(dic);
                 }
@@ -847,9 +857,10 @@ pub fn sheet_to_data<'a>(
                     }
                 }
                 if enums.len() > 0 && enums[i].len() > 0 && i > 0 {
-                    if !enums[i].contains_key(&value) {
+                    if is_enum_none(&value) {
+                    } else if !enums[i].contains_key(&value) {
                         error!(
-                            "{} 不在枚举类型 {:?} 中! File: [{}],Sheet: [{}], Row: [{}]",
+                            "{} 不在枚举集合 {:?} 中! File: [{}],Sheet: [{}], Row: [{}]",
                             value, &enums[i], input_file_name, sheet_name, row_num
                         );
                         return Err(1);
@@ -1377,6 +1388,10 @@ fn to_hash_id(key: &String) -> u32 {
 
 fn convert_enum_type(field_name: &String) -> String {
     return field_name.to_class_case();
+}
+
+fn is_enum_none(value: &String) -> bool {
+    value.trim().is_empty() || value.to_uppercase() == "NONE"
 }
 
 // input: {"是": 1, "否": 0}
