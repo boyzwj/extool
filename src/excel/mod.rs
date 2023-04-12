@@ -1,8 +1,6 @@
 use ahash::{AHashMap, AHashSet};
 use calamine::{open_workbook, DataType, Range, Reader, Xlsx};
 use indexmap::IndexMap;
-use inflector::Inflector;
-use pinyin::ToPinyin;
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage};
 use prost_reflect::{MapKey, Value as PValue};
@@ -47,27 +45,30 @@ pub struct SheetData<'a> {
     refs: Vec<String>,
     types: Vec<String>,
     describes: Vec<String>,
-    enums: Vec<AHashMap<String, usize>>,
+    enum_names: Vec<String>,
     values: Vec<Vec<&'a DataType>>,
     force_mods: Vec<String>,
     export_columns: String,
     valid_columns: Vec<usize>,
     valid_front_types: Vec<String>,
-    valid_enums: AHashMap<usize, Vec<(usize, String, String)>>,
-    sorted_enum_keys: Vec<usize>,
 }
 
 impl<'a> SheetData<'_> {
-    pub fn export(&self, format: &String, dst_path: &String) -> Result<usize, usize> {
+    pub fn export(
+        &self,
+        format: &String,
+        dst_path: &String,
+        enum_values: &HashMap<String, Vec<EnumValue>>,
+    ) -> Result<usize, usize> {
         let temp = format.to_uppercase();
         if temp == "JSON" {
-            return self.data_to_json(&dst_path);
+            return self.data_to_json(&dst_path, enum_values);
         } else if temp == "LUA" {
-            return self.data_to_lua(&dst_path);
+            return self.data_to_lua(&dst_path, enum_values);
         } else if temp == "EX" {
-            return self.data_to_ex(&dst_path);
+            return self.data_to_ex(&dst_path, enum_values);
         } else if temp == "PBD" {
-            return self.data_to_pbd(&dst_path);
+            return self.data_to_pbd(&dst_path, enum_values);
         } else if temp == "LANG" {
             return self.data_to_lang(&dst_path);
         }
@@ -101,7 +102,11 @@ impl<'a> SheetData<'_> {
         }
     }
 
-    pub fn data_to_json(&self, out_path: &String) -> Result<usize, usize> {
+    pub fn data_to_json(
+        &self,
+        out_path: &String,
+        enum_values: &HashMap<String, Vec<EnumValue>>,
+    ) -> Result<usize, usize> {
         let file_name = &self.output_file_name;
         let export_columns = &self.export_columns;
         let mut res: Map<String, Value> = Map::new();
@@ -112,7 +117,8 @@ impl<'a> SheetData<'_> {
                     let column_name = &self.names[i];
                     let origin_type = &self.types[i];
                     let ref_name = &self.refs[i];
-                    if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                    let enum_name = &self.enum_names[i];
+                    if self.enum_names.len() == 0 || self.enum_names[i].len() == 0 {
                         let real_type = get_real_type(export_columns, ref_name, origin_type, false);
                         let value = cell_to_json(
                             &rv[i],
@@ -126,15 +132,12 @@ impl<'a> SheetData<'_> {
                         let value = &rv[i].to_string().trim().to_string();
                         if is_enum_none(value) {
                             map.insert(column_name.to_string(), json!(0));
-                        } else if let Some(x) = &self.enums[i].get(value) {
+                        } else if let Ok(x) = to_enum_index(enum_values, enum_name, value) {
                             map.insert(column_name.to_string(), json!(x));
                         } else {
                             error!(
-                                "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {:?} 中",
-                                column_name,
-                                &rv[1],
-                                value,
-                                &self.enums[i].keys()
+                                "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {} 中",
+                                column_name, &rv[1], value, &self.enum_names[i]
                             );
                             return Err(1);
                         }
@@ -143,11 +146,13 @@ impl<'a> SheetData<'_> {
             }
 
             if map.len() > 0 {
-                let key_is_enum = self.enums[1].is_empty() == false;
+                let key_is_enum = self.enum_names[1].is_empty() == false;
                 let enum_value = rv[1].to_string().trim().to_string();
                 let mut keyvalue = enum_value.to_string();
                 if key_is_enum {
-                    keyvalue = self.enums[1].get(&enum_value).unwrap().to_string();
+                    keyvalue = to_enum_index(enum_values, &self.enum_names[1], &keyvalue)
+                        .unwrap()
+                        .to_string();
                 }
 
                 res.insert(keyvalue, json!(map));
@@ -167,7 +172,11 @@ impl<'a> SheetData<'_> {
         return Ok(0);
     }
 
-    pub fn data_to_lua(&self, out_path: &String) -> Result<usize, usize> {
+    pub fn data_to_lua(
+        &self,
+        out_path: &String,
+        enum_values: &HashMap<String, Vec<EnumValue>>,
+    ) -> Result<usize, usize> {
         let file_name = &self.output_file_name;
         let export_columns = &self.export_columns;
         let mut res: Vec<String> = vec![];
@@ -186,8 +195,8 @@ impl<'a> SheetData<'_> {
                 if self.types[i] != "" {
                     let column_name = &self.names[i];
                     let origin_type = &self.types[i];
-                    // let dic = &self.enums[i];
-                    if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                    let enum_name = &self.enum_names[i];
+                    if self.enum_names.len() == 0 || self.enum_names[i].len() == 0 {
                         let real_type =
                             get_real_type(export_columns, &self.refs[i], origin_type, false);
                         let value = cell_to_string(&rv[i], &real_type, file_name, &column_name);
@@ -196,15 +205,12 @@ impl<'a> SheetData<'_> {
                         let value = &rv[i].to_string().trim().to_string();
                         if is_enum_none(value) {
                             columns.push(format!("{}", 0));
-                        } else if let Some(x) = &self.enums[i].get(value) {
+                        } else if let Ok(x) = to_enum_index(enum_values, enum_name, value) {
                             columns.push(format!("{}", x));
                         } else {
                             error!(
                                 "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {:?} 中",
-                                column_name,
-                                &rv[1],
-                                value,
-                                &self.enums[i].keys()
+                                column_name, &rv[1], value, &self.enum_names[i]
                             );
                             return Err(1);
                         }
@@ -212,12 +218,15 @@ impl<'a> SheetData<'_> {
                 }
             }
             if columns.len() > 0 {
-                let key_is_enum = self.enums[1].is_empty() == false;
+                let enum_name = &self.enum_names[1];
+                let key_is_enum = enum_name.is_empty() == false;
                 let mut keyvalue =
                     cell_to_string(&rv[1], &self.types[1], file_name, &self.names[1]);
                 if key_is_enum {
                     let enum_value = &rv[1].to_string().trim().to_string();
-                    keyvalue = self.enums[1].get(enum_value).unwrap().to_string();
+                    keyvalue = to_enum_index(enum_values, enum_name, enum_value)
+                        .unwrap()
+                        .to_string();
                 }
 
                 res.push(format!("\t[{}] = {{{}}}", keyvalue, columns.join(",")));
@@ -260,11 +269,13 @@ impl<'a> SheetData<'_> {
         return Ok(0);
     }
 
-    pub fn data_to_ex(&self, dst_path: &String) -> Result<usize, usize> {
+    pub fn data_to_ex(
+        &self,
+        dst_path: &String,
+        enum_values: &HashMap<String, Vec<EnumValue>>,
+    ) -> Result<usize, usize> {
         let file_name = &self.output_file_name;
         let export_columns = &self.export_columns;
-        let valid_enums = &self.valid_enums;
-        let sorted_enum_keys = &self.sorted_enum_keys;
         let mut res: Vec<String> = vec![];
         let mut ids: Vec<String> = vec![];
         for rv in &self.values {
@@ -273,7 +284,8 @@ impl<'a> SheetData<'_> {
                 if self.types[i] != "" {
                     let column_name = &self.names[i];
                     let origin_type = &self.types[i];
-                    if self.enums.len() == 0 || self.enums[i].len() == 0 {
+                    let enum_name = &self.enum_names[i];
+                    if self.enum_names.len() == 0 || self.enum_names[i].len() == 0 {
                         let real_type =
                             get_real_type(export_columns, &self.refs[i], origin_type, false);
                         let value = cell_to_string(&rv[i], &real_type, file_name, &column_name);
@@ -282,15 +294,12 @@ impl<'a> SheetData<'_> {
                         let value = &rv[i].to_string().trim().to_string();
                         if is_enum_none(value) {
                             columns.push(format!("\t\t\t{}: {}", column_name.to_lowercase(), 0));
-                        } else if let Some(x) = &self.enums[i].get(value) {
+                        } else if let Ok(x) = to_enum_index(enum_values, enum_name, value) {
                             columns.push(format!("\t\t\t{}: {}", column_name.to_lowercase(), x));
                         } else {
                             error!(
-                                "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {:?} 中",
-                                column_name,
-                                &rv[1],
-                                value,
-                                &self.enums[i].keys()
+                                "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {} 中",
+                                column_name, &rv[1], value, &self.enum_names[i]
                             );
                             return Err(1);
                         }
@@ -298,12 +307,15 @@ impl<'a> SheetData<'_> {
                 }
             }
             if columns.len() > 0 {
-                let key_is_enum = self.enums[1].is_empty() == false;
+                let enum_name = &self.enum_names[1];
+                let key_is_enum = enum_name.is_empty() == false;
                 let mut keyvalue =
                     cell_to_string(&rv[1], &self.types[1], file_name, &self.names[1]);
                 if key_is_enum {
                     let enum_value = &rv[1].to_string().trim().to_string();
-                    keyvalue = self.enums[1].get(enum_value).unwrap().to_string();
+                    keyvalue = to_enum_index(enum_values, enum_name, enum_value)
+                        .unwrap()
+                        .to_string();
                 }
 
                 res.push(format!(
@@ -323,31 +335,9 @@ impl<'a> SheetData<'_> {
             return Ok(0);
         }
         let module_name = self.mod_name.clone();
-
-        let mut enum_mods: Vec<String> = vec![];
-        for i in sorted_enum_keys {
-            let mut schema_fields: Vec<String> = vec![];
-            let fk = &self.names[*i].to_class_case();
-            schema_fields.push(format!("    value({}, {})", "None", 0));
-            for (k, v, _comment) in valid_enums.get(i).unwrap() {
-                schema_fields.push(format!("    value({}, {})", v.to_class_case(), k));
-            }
-            let enum_mod = format!(
-                "  defenum {} do
-{}
-  end",
-                fk,
-                schema_fields.join("\n")
-            );
-            enum_mods.push(enum_mod);
-        }
-        if !enum_mods.is_empty() {
-            enum_mods.insert(0, "  use EnumType".to_string())
-        }
         let out = format!(
             "defmodule {} do
   ## SOURCE:\"{}\" SHEET:\"{}\"
-{}
 
   def ids() do
     [{}]
@@ -363,7 +353,6 @@ end",
             module_name,
             self.input_file_name,
             self.sheet_name,
-            enum_mods.join("\n\n"),
             ids.join(", "),
             res.join("\n\n")
         );
@@ -375,7 +364,11 @@ end",
         return Ok(0);
     }
 
-    pub fn data_to_pbd(&self, out_path: &String) -> Result<usize, usize> {
+    pub fn data_to_pbd(
+        &self,
+        out_path: &String,
+        enum_values: &HashMap<String, Vec<EnumValue>>,
+    ) -> Result<usize, usize> {
         if self.mod_name == "" {
             return Ok(0);
         }
@@ -470,18 +463,16 @@ end",
                 let fk = &self.names[i];
                 let fv = self.values[x][i];
                 let enu_val = &fv.to_string().trim().to_string();
+                let enum_name = &self.enum_names[i];
                 if ft == "ENUM" {
                     if enu_val == "0" || enu_val.trim().is_empty() {
                         dm.set_field_by_name(fk, PValue::U32(0 as u32));
-                    } else if let Some(x) = self.enums[i].get(enu_val) {
-                        dm.set_field_by_name(fk, PValue::U32(*x as u32));
+                    } else if let Ok(x) = to_enum_index(enum_values, enum_name, enu_val) {
+                        dm.set_field_by_name(fk, PValue::U32(x as u32));
                     } else {
                         error!(
                             "列 {},ID: {} 存在非法枚举值, \"{}\" 不在 {:?} 中",
-                            fk,
-                            &self.values[x][1],
-                            enu_val,
-                            &self.enums[i].keys()
+                            fk, &self.values[x][1], enu_val, &self.enum_names[i]
                         );
                         return Err(1);
                     }
@@ -546,8 +537,6 @@ end",
         let valid_front_types = &self.valid_front_types;
         let names = &self.names;
         let describes = &self.describes;
-        let valid_enums = &self.valid_enums;
-        let sorted_enum_keys = &self.sorted_enum_keys;
         let mut field_schemas: Vec<String> = vec![];
         for y in 0..valid_columns.len() {
             let i = valid_columns[y];
@@ -568,34 +557,12 @@ end",
             field_schemas.push(format!("\t{} {} = {}; //{}", &field_schema, fk, y + 1, des));
         }
 
-        let mut enum_msgs = vec![];
-        for i in sorted_enum_keys {
-            let arr = valid_enums.get(i).unwrap();
-            let mut enum_schemas = vec![];
-            let fk = names[*i].to_lowercase();
-            enum_schemas.push(format!("\t\t{}_{} = {};//{}", fk, "None", 0, "空"));
-            for (k, v, comment) in arr {
-                enum_schemas.push(format!("\t\t{}_{} = {};//{}", fk, v, k, comment))
-            }
-            let msg_enum = format!(
-                "\tenum Enum{}
-    {{\n\
-                {}\n\
-                \t}}",
-                convert_enum_type(&names[*i]),
-                enum_schemas.join("\n")
-            );
-            enum_msgs.push(msg_enum)
-        }
-
         return format!(
             "message {}{{\n\
-            {}\n\
             {}\n\
             }}",
             class_name,
             field_schemas.join("\n"),
-            enum_msgs.join("\n")
         );
     }
 }
@@ -606,9 +573,12 @@ pub fn xls_to_file(
     format: String,
     multi_sheets: bool,
     export_columns: String,
+    pbe_path: String,
 ) -> usize {
     let mut excel: Xlsx<_> = open_workbook(input_file_name.clone()).unwrap();
     let mut sheets = excel.sheet_names().to_owned();
+
+    let enum_values = extract_all_enum_values(&pbe_path);
 
     if !multi_sheets {
         sheets = vec![excel.sheet_names()[0].to_string()];
@@ -625,10 +595,11 @@ pub fn xls_to_file(
                 &sheet,
                 &r,
                 export_columns.to_string(),
+                &enum_values,
             );
 
             match result {
-                Ok(data) => match data.export(&format, &dst_path) {
+                Ok(data) => match data.export(&format, &dst_path, &enum_values) {
                     Ok(code) => return code,
                     Err(err_code) => return err_code,
                 },
@@ -763,6 +734,7 @@ pub fn sheet_to_data<'a>(
     sheet_name: &'a String,
     sheet: &'a Range<DataType>,
     export_columns: String,
+    enum_values: &HashMap<String, Vec<EnumValue>>,
 ) -> Result<SheetData<'a>, usize> {
     let mut output_file_name: String = String::new();
     let mut mod_name: String = String::new();
@@ -772,7 +744,7 @@ pub fn sheet_to_data<'a>(
     let mut back_types: Vec<String> = vec![];
     let mut refs: Vec<String> = vec![];
     let mut describes: Vec<String> = vec![];
-    let mut enums: Vec<AHashMap<String, usize>> = vec![];
+    let mut enum_names: Vec<String> = vec![];
     let mut row_num: usize = 0;
     let mut force_mods: Vec<String> = vec![];
     for row in sheet.rows() {
@@ -809,17 +781,8 @@ pub fn sheet_to_data<'a>(
             }
         } else if st == "ENUM" {
             for v in row {
-                let enum_words = v.to_string().trim().to_string();
-                let mut dic: AHashMap<String, usize> = AHashMap::new();
-                if enum_words == "" {
-                    enums.push(dic);
-                } else {
-                    let words: Vec<&str> = enum_words.split('|').collect();
-                    for i in 0..words.len() {
-                        dic.insert(words[i].to_string(), i + 1);
-                    }
-                    enums.push(dic);
-                }
+                let enum_name = v.to_string().trim().to_string();
+                enum_names.push(enum_name);
             }
         } else if st == "FORCE_MOD" {
             for v in row {
@@ -856,14 +819,19 @@ pub fn sheet_to_data<'a>(
                         }
                     }
                 }
-                if enums.len() > 0 && enums[i].len() > 0 && i > 0 {
+                if enum_names.len() > 0 && !enum_names[i].is_empty() && i > 0 {
                     if is_enum_none(&value) {
-                    } else if !enums[i].contains_key(&value) {
-                        error!(
-                            "{} 不在枚举集合 {:?} 中! File: [{}],Sheet: [{}], Row: [{}]",
-                            value, &enums[i], input_file_name, sheet_name, row_num
-                        );
-                        return Err(1);
+                    } else {
+                        match to_enum_index(enum_values, &enum_names[i], &value) {
+                            Ok(_index) => (),
+                            Err(_) => {
+                                error!(
+                                    "{} 不在枚举集合 {:?} 中! File: [{}],Sheet: [{}], Row: [{}]",
+                                    value, &enum_names[i], input_file_name, sheet_name, row_num
+                                );
+                                return Err(1);
+                            }
+                        }
                     }
                 }
                 row_value.push(&row[i]);
@@ -889,8 +857,8 @@ pub fn sheet_to_data<'a>(
         types = back_types;
     }
 
-    if enums.is_empty() {
-        enums = vec![AHashMap::new(); types.len()];
+    if enum_names.is_empty() {
+        enum_names = vec![String::new(); types.len()];
     }
 
     if refs.is_empty() {
@@ -899,43 +867,18 @@ pub fn sheet_to_data<'a>(
 
     let mut valid_columns: Vec<usize> = vec![];
     let mut valid_front_types: Vec<String> = vec![];
-    let mut valid_enums: AHashMap<usize, Vec<(usize, String, String)>> = AHashMap::new();
     for i in 1..types.len() {
         let origin_type = &types[i];
         let fk = &names[i];
         if origin_type == "" || fk == "" {
             continue;
         }
-        let is_enum = origin_type != "BOOL" && !enums[i].is_empty();
+        let is_enum = origin_type != "BOOL" && !enum_names[i].is_empty();
         let ref_name = &refs[i];
         let ft = get_real_type(&export_columns, ref_name, &origin_type, is_enum);
         valid_front_types.push(ft);
         valid_columns.push(i);
     }
-
-    for y in 0..valid_columns.len() {
-        let i = valid_columns[y];
-        let ft = &valid_front_types[y];
-        if ft == "ENUM" {
-            match convert_to_pinyin(&enums[i]) {
-                Ok(arr) => valid_enums.insert(i, arr),
-                Err(txt) => {
-                    error!(
-                        "Enum的值[{}]只能纯汉字或者纯英文  File: [{}] Sheet: [{}],Mod_name: [{}], Key: {}, Type: {}\n",
-                        txt, input_file_name, sheet_name, mod_name,  names[i], ft
-                    );
-                    return Err(1);
-                }
-            };
-        }
-    }
-
-    let mut sorted_enum_keys = vec![];
-
-    for i in valid_enums.keys() {
-        sorted_enum_keys.push(*i);
-    }
-    sorted_enum_keys.sort();
 
     let info: SheetData = SheetData {
         input_file_name: input_file_name,
@@ -947,13 +890,11 @@ pub fn sheet_to_data<'a>(
         values: values,
         refs: refs,
         describes: describes,
-        enums: enums,
+        enum_names: enum_names,
         force_mods: force_mods,
         export_columns: export_columns,
         valid_columns,
         valid_front_types,
-        valid_enums,
-        sorted_enum_keys,
     };
     return Ok(info);
 }
@@ -1386,45 +1327,65 @@ fn to_hash_id(key: &String) -> u32 {
     return (u128::from_str_radix(&format!("{:x}", digest), 16).unwrap() % 4294967296) as u32;
 }
 
-fn convert_enum_type(field_name: &String) -> String {
-    return field_name.to_class_case();
-}
-
 fn is_enum_none(value: &String) -> bool {
     value.trim().is_empty() || value.to_uppercase() == "NONE"
 }
 
-// input: {"是": 1, "否": 0}
-// output: {0: "shi", 1: "fou"}
-fn convert_to_pinyin(
-    enum_keys: &AHashMap<String, usize>,
-) -> Result<Vec<(usize, String, String)>, String> {
-    let mut arr: Vec<(usize, String, String)> = vec![];
-    for (k, i) in enum_keys {
-        let text = k.as_str();
-        let mut enum_elems: Vec<String> = vec![];
-        let mut is_pure_hanzi = true;
-        for option_pinyin in text.to_pinyin() {
-            match option_pinyin {
-                Some(pinyin) => {
-                    // let py = pinyin.plain().to_string();
-                    let py = pinyin.plain().replace('ü', "v");
-                    enum_elems.push(py);
-                }
-                None => {
-                    is_pure_hanzi = false;
+pub struct EnumValue {
+    index: i32,
+    comment: String,
+}
+
+use std::collections::HashMap;
+pub fn extract_all_enum_values(file_path: &str) -> HashMap<String, Vec<EnumValue>> {
+    let file_contents = fs::read_to_string(file_path).unwrap();
+    let mut enum_values = HashMap::new();
+
+    let enum_regex = regex::Regex::new(r#"enum\s+(\w+)\s*\{([^}]+)\}"#).unwrap();
+    let comment_regex = regex::Regex::new(r#"//(.*)$"#).unwrap();
+    let value_regex = regex::Regex::new(r#"(\w+)\s*=\s*(\d+);"#).unwrap();
+
+    for enum_match in enum_regex.captures_iter(&file_contents) {
+        let enum_name = enum_match[1].to_owned();
+        let enum_body = enum_match[2].to_owned();
+        let mut values = Vec::new();
+
+        for line in enum_body.lines() {
+            if let Some(comment_match) = comment_regex.captures(line) {
+                if let Some(value_match) = value_regex.captures(line) {
+                    // let key = value_match[1].to_owned();
+                    let index = value_match[2].parse().unwrap();
+                    let comment = comment_match[1].trim().to_owned();
+                    values.push(EnumValue { index, comment });
                 }
             }
         }
-        if is_pure_hanzi == false {
-            if !enum_elems.is_empty() {
-                return Err(text.to_string());
-            }
-            enum_elems.push(k.to_string());
+
+        if !values.is_empty() {
+            enum_values.insert(enum_name, values);
         }
-        let temp = enum_elems.join("_");
-        arr.push((*i, temp, k.to_string()));
     }
-    arr.sort();
-    return Ok(arr);
+
+    enum_values
+}
+
+fn to_enum_index(
+    enum_values: &HashMap<String, Vec<EnumValue>>,
+    enum_name: &String,
+    comment: &String,
+) -> Result<i32, String> {
+    match enum_values.get(enum_name) {
+        Some(arr) => {
+            for info in arr {
+                if &info.comment == comment {
+                    return Ok(info.index);
+                }
+            }
+            return Err(format!(
+                "EnumName: {},Comment: {} not found",
+                enum_name, comment
+            ));
+        }
+        None => return Err(format!("EnumName: {} not found", enum_name)),
+    }
 }

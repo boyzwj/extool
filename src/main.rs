@@ -49,6 +49,8 @@ struct Args {
     ///导出的列 FRONT|BACK|BOTH
     #[clap(short, long, value_parser, default_value = "FRONT")]
     export_columns: String,
+    #[clap(short, long, value_parser, default_value = "pbe.proto")]
+    pbe_file: String,
 }
 
 fn main() -> Result<(), usize> {
@@ -124,7 +126,7 @@ fn gen_from_excel(args: Args) -> usize {
         pool.close();
         return 1;
     }
-
+    let pbe_path = format!("{}/enum/{}", args.input_path, args.pbe_file);
     //******************* EXPORT FILE  ***************//
     for file in &xls_files {
         let file1 = file.clone();
@@ -133,8 +135,16 @@ fn gen_from_excel(args: Args) -> usize {
         let format = args.format.clone();
         let multi_sheets = args.multi_sheets.clone().to_uppercase() == "TRUE";
         let export_columns = args.export_columns.clone().to_uppercase();
+        let pbe_path = pbe_path.clone();
         pool.execute(move || {
-            let code = excel::xls_to_file(file1, dst_path, format, multi_sheets, export_columns);
+            let code = excel::xls_to_file(
+                file1,
+                dst_path,
+                format,
+                multi_sheets,
+                export_columns,
+                pbe_path,
+            );
             tx.send(code).unwrap();
         })
         .ok();
