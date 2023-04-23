@@ -41,7 +41,7 @@ fn find_element(
                 let arrs: Vec<&str> = temp_proto.split(&['.']).collect();
                 let mut new_arrs: Vec<String> = vec![];
                 for t_str in arrs.into_iter() {
-                    new_arrs.push(uppercase_first_letter(t_str));
+                    new_arrs.push(t_str.to_pascal_case());
                 }
                 let proto = new_arrs.join(".");
                 let digest = md5::compute(&proto);
@@ -202,10 +202,6 @@ PT_PKGS = {{
     let output_file_name = String::from("PT.lua");
     let path_str = format!("{}/{}", out_path, output_file_name);
     fs::write(path_str, out).unwrap();
-}
-
-fn uppercase_first_letter(s: &str) -> String {
-    s[0..1].to_uppercase() + &s[1..]
 }
 
 fn lowercase_first_letter(s: &str) -> String {
