@@ -777,7 +777,7 @@ pub fn sheet_to_data<'a>(
             }
         } else if st == "DES" {
             for v in row {
-                describes.push(v.to_string().trim().replace('\n', ""));
+                describes.push(v.to_string().trim().replace("\r\n", " ").replace('\n', " "));
             }
         } else if st == "ENUM" {
             for v in row {
