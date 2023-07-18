@@ -343,8 +343,13 @@ impl<'a> SheetData<'_> {
     [{}]
   end
 
-  def all(), do: for id <- ids(), do: get(id)
-  def query(q), do: for data <- all(), q.(data), do: data
+  def all() do
+    ids() |> Enum.map(&get/1)
+  end
+
+  def query(q) do
+    all() |> Enum.filter(q)
+  end
 
 {}
   
