@@ -11,7 +11,7 @@ use simple_excel_writer::*;
 use static_init::dynamic;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::io::{Error, ErrorKind};
+use std::path::Path;
 use std::string::String;
 use std::{env, fs};
 
@@ -29,6 +29,10 @@ static mut GLOBAL_PBD: AHashMap<String, String> = AHashMap::new();
 
 #[dynamic]
 static mut GLOBAL_LANG: AHashMap<String, String> = AHashMap::new();
+
+#[dynamic]
+static mut GLOBAL_LANG_SOURCE: AHashMap<String, String> = AHashMap::new();
+
 #[dynamic]
 static mut GLOBAL_EXCLUDE_SHEETS: AHashSet<String> = AHashSet::new();
 
@@ -530,7 +534,10 @@ end",
                     let lang_key = rows[i].to_string();
                     let lang_val = rows[lang_field_index].to_string();
 
-                    GLOBAL_LANG.write().insert(lang_key, lang_val);
+                    GLOBAL_LANG.write().insert(lang_key.to_string(), lang_val);
+                    GLOBAL_LANG_SOURCE
+                        .write()
+                        .insert(lang_key.to_string(), self.input_file_name.to_string());
                 }
             }
         }
@@ -943,49 +950,13 @@ pub fn create_pbd_file(out_path: &String) -> usize {
 
 pub fn create_lang_file(out_path: &String) -> usize {
     let data = GLOBAL_LANG.read();
+    let data_source = GLOBAL_LANG_SOURCE.read();
     let mut sorted_keys: Vec<String> = vec![];
-    let mut hash_ids = vec![];
     for key in data.keys() {
         sorted_keys.push(key.to_string());
     }
     sorted_keys.sort();
 
-    let wbk_name = "D多语言Key表.xlsx";
-    let mut wbk = Workbook::create(format!("{out_path}/{wbk_name}").as_str());
-    let mut sheetk = wbk.create_sheet("sheet1");
-    sheetk.add_column(Column { width: 30.0 });
-    sheetk.add_column(Column { width: 30.0 });
-    sheetk.add_column(Column { width: 80.0 });
-
-    let write_result = wbk.write_sheet(&mut sheetk, |sheet_writer| {
-        let sw = sheet_writer;
-        sw.append_row(row!["MOD", "Data.LanguageKey", ""])?;
-        sw.append_row(row!["BACK_TYPE", "", ""])?;
-        sw.append_row(row!["FRONT_TYPE", "uint32", "string"])?;
-        sw.append_row(row!["DES", "文本Key的Hash截取", "文本Key D_XXX"])?;
-        sw.append_row(row!["NAMES", "hash", "value"])?;
-        sw.append_row(row!["ENUM", blank!(2)])?;
-        sw.append_row(row!["REF", blank!(2)])?;
-        sw.append_row(row![blank!(3)])?;
-        for key in &sorted_keys {
-            let hash = to_hash_id(key);
-            if hash_ids.contains(&hash) {
-                error!("key: {key} 的hash值重复 hash: {hash}");
-                return Err(Error::new(ErrorKind::Other, "key is repeat"));
-            } else {
-                hash_ids.push(hash);
-            }
-            sw.append_row(row!["VALUE", hash.to_string(), key.to_string()])?;
-        }
-        sw.append_row(row![blank!(3)])
-    });
-    wbk.close()
-        .expect(format!("close {wbk_name} error!").as_str());
-
-    match write_result {
-        Ok(_) => (),
-        Err(_) => return 1,
-    };
     let wbl_name = "D多语言简体中文表.xlsx";
     let mut wbl = Workbook::create(format!("{out_path}/{wbl_name}").as_str());
     let mut sheetl = wbl.create_sheet("sheet1");
@@ -997,9 +968,15 @@ pub fn create_lang_file(out_path: &String) -> usize {
         let sw = sheet_writer;
         sw.append_row(row!["MOD", "Data.LanguagezhCN", ""])?;
         sw.append_row(row!["BACK_TYPE", "", ""])?;
-        sw.append_row(row!["FRONT_TYPE", "uint32", "string"])?;
-        sw.append_row(row!["DES", "文本Key的Hash截取", "中文"])?;
-        sw.append_row(row!["NAMES", "hash", "value"])?;
+        sw.append_row(row!["FRONT_TYPE", "uint32", "string", "string", "string"])?;
+        sw.append_row(row![
+            "DES",
+            "文本Key的Hash截取",
+            "多语言key",
+            "中文",
+            "来源"
+        ])?;
+        sw.append_row(row!["NAMES", "hash", "key", "value", "source"])?;
         sw.append_row(row!["ENUM", blank!(2)])?;
         sw.append_row(row!["REF", blank!(2)])?;
         sw.append_row(row!["FORCE_MOD", "Language", ""])?;
@@ -1007,7 +984,16 @@ pub fn create_lang_file(out_path: &String) -> usize {
         for key in &sorted_keys {
             let hash = to_hash_id(key);
             let val = data.get(key).unwrap();
-            sw.append_row(row!["VALUE", hash.to_string(), val.to_string()])?;
+            let source = data_source.get(key).unwrap();
+            let p1 = Path::new(&source);
+            let source_filename = p1.file_name().unwrap().to_str().unwrap();
+            sw.append_row(row![
+                "VALUE",
+                hash.to_string(),
+                key.to_string(),
+                val.to_string(),
+                source_filename.to_string()
+            ])?;
         }
         sw.append_row(row![blank!(3)])
     });
