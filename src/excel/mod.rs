@@ -534,10 +534,12 @@ end",
                     let lang_key = rows[i].to_string();
                     let lang_val = rows[lang_field_index].to_string();
 
-                    GLOBAL_LANG.write().insert(lang_key.to_string(), lang_val);
-                    GLOBAL_LANG_SOURCE
-                        .write()
-                        .insert(lang_key.to_string(), self.input_file_name.to_string());
+                    if !lang_key.is_empty() {
+                        GLOBAL_LANG.write().insert(lang_key.to_string(), lang_val);
+                        GLOBAL_LANG_SOURCE
+                            .write()
+                            .insert(lang_key.to_string(), self.input_file_name.to_string());
+                    }
                 }
             }
         }
