@@ -40,7 +40,7 @@ struct Args {
     ///导出目录
     #[clap(short, long, value_parser, default_value = "./")]
     output_path: String,
-    ///导出格式 NONE | JSON | LUA | EX | CS | PBD | LANG
+    ///导出格式 NONE | JSON | LUA | EX | CS | PBD | LANG | GROUP
     #[clap(short, long, value_parser, default_value = "NONE")]
     format: String,
     ///是否允许多sheets导出 TRUE|FALSE
@@ -168,6 +168,13 @@ fn gen_from_excel(args: Args) -> usize {
 
     if args.type_input.to_uppercase() == "EXCEL" && args.format.to_uppercase() == "LANG" {
         match excel::create_lang_file(&args.output_path) {
+            0 => (),
+            _ => return 1,
+        }
+    }
+
+    if args.type_input.to_uppercase() == "EXCEL" && args.format.to_uppercase() == "GROUP" {
+        match excel::create_group_files(&args.output_path) {
             0 => (),
             _ => return 1,
         }

@@ -39,6 +39,15 @@ static mut GLOBAL_EXCLUDE_SHEETS: AHashSet<String> = AHashSet::new();
 #[dynamic]
 static mut GLOBAL_MODS: AHashSet<String> = AHashSet::new();
 
+#[dynamic]
+static mut GLOBAL_GROUP_NAMES: AHashMap<String, String> = AHashMap::new();
+
+#[dynamic]
+static mut GLOBAL_GROUP_IDS: AHashSet<String> = AHashSet::new();
+
+#[dynamic]
+static mut GLOBAL_MOD_IDS: AHashMap<String, Vec<String>> = AHashMap::new();
+
 // static mut
 pub struct SheetData<'a> {
     input_file_name: String,
@@ -640,6 +649,9 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
             let mut front_primary = String::new();
             let mut back_primary = String::new();
             let mut mod_name: String = String::new();
+            let mut group_name: String = String::new();
+            let mut ids: Vec<String> = vec![];
+
             for row in r.rows() {
                 row_num = row_num + 1;
                 let mut st = row[0].to_string().trim().to_string();
@@ -659,36 +671,11 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
                     } else {
                         GLOBAL_MODS.write().insert(mod_name.to_string());
                     }
-                } else if st == "VALUE" {
-                    let key = format!("{}:{}", mod_name, row[1].to_string().trim().to_string());
-                    if GLOBAL_IDS.read().contains(&key) {
-                        error!(
-                            "配置了重复的键值!! File: [{}] Sheet: [{}],Mod_name: [{}] Row: {} Key: {} \n",
-                            &input_file_name, &sheet,&mod_name, row_num, &key
-                        );
-                        return 1;
-                    } else {
-                        GLOBAL_IDS.write().insert(key);
-                    }
                 } else if st == "BACK_TYPE" {
                     back_primary = row[1].clone().to_string().trim().to_uppercase();
                 } else if st == "FRONT_TYPE" {
                     front_primary = row[1].clone().to_string().trim().to_uppercase();
                 } else if st == "NAMES" {
-                    // if export_columns == "BACK" && back_primary.is_empty() {
-                    //     info!(
-                    //         "SKIPPING for {}_TYPE is none！File: [{}] Sheet: [{}],export_columns: [{}]\n",
-                    //         &export_columns, &input_file_name, &sheet, &export_columns
-                    //     );
-                    //     GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path.to_string());
-                    // } else if export_columns == "FRONT" && front_primary.is_empty() {
-                    //     info!(
-                    //         "SKIPPING for {}_TYPE is none！File: [{}] Sheet: [{}],export_columns: [{}]\n",
-                    //         &export_columns, &input_file_name, &sheet, &export_columns
-                    //     );
-                    //     GLOBAL_EXCLUDE_SHEETS.write().insert(sheet_path.to_string());
-                    // }
-
                     if front_primary.is_empty() && back_primary.is_empty() {
                         info!(
                             "SKIPPING for both `FRONT_TYPE` and `BACK_TYPE`  is none！ File: [{}] Sheet: [{}],export_columns: [{}]\n",
@@ -736,11 +723,74 @@ pub fn build_id(input_file_name: String, multi_sheets: bool, export_columns: Str
                             names.insert(rv);
                         }
                     }
+                } else if st == "GROUP" {
+                    group_name = row[1].to_string().trim().to_string();
+                } else if st == "VALUE" {
+                    let record_id = row[1].to_string().trim().to_string();
+                    let key = format!("{}:{}", mod_name, &record_id);
+                    if GLOBAL_IDS.read().contains(&key) {
+                        error!(
+                            "配置了重复的键值!! File: [{}] Sheet: [{}],Mod_Name: [{}] Row: {} Key: {} \n",
+                            &input_file_name, &sheet,&mod_name, row_num, &key
+                        );
+                        return 1;
+                    } else {
+                        GLOBAL_IDS.write().insert(key);
+                        ids.push(record_id.to_string());
+                    }
+
+                    if !group_name.is_empty() {
+                        let group_id_key = format!("{}:{}", &group_name, &record_id);
+                        if GLOBAL_GROUP_IDS.read().contains(&group_id_key) {
+                            let conflict_mod_names =
+                                find_group_mod_name_that_contain_id(&group_name, &record_id);
+                            error!(
+                                "配置了重复的键值!! Mod_Name: [{}],ConfictModName: [{}] Row: {} group_id_key: {} \n",
+                                &mod_name,
+                                conflict_mod_names.join(","),
+                                row_num,
+                                &group_id_key
+                            );
+                            return 1;
+                        } else {
+                            GLOBAL_GROUP_IDS.write().insert(group_id_key);
+                        }
+                    }
                 }
             }
+
+            if !group_name.is_empty() {
+                GLOBAL_GROUP_NAMES
+                    .write()
+                    .insert(mod_name.to_string(), group_name.to_string());
+            }
+            GLOBAL_MOD_IDS.write().insert(mod_name.to_string(), ids);
         }
     }
     return 0;
+}
+
+fn find_group_mod_names(group_name: &String) -> Vec<String> {
+    let group_names = GLOBAL_GROUP_NAMES.read();
+    let mut contents = vec![];
+    for (mod_name, v) in group_names.iter() {
+        if v == group_name {
+            contents.push(mod_name.to_string());
+        }
+    }
+    return contents;
+}
+
+fn find_group_mod_name_that_contain_id(group_name: &String, id: &String) -> Vec<String> {
+    let mod_names = find_group_mod_names(group_name);
+    let mut contents = vec![];
+    for mod_name in mod_names {
+        let ids = GLOBAL_MOD_IDS.read().get(&mod_name).unwrap().to_vec();
+        if ids.contains(id) {
+            contents.push(mod_name.to_string());
+        }
+    }
+    return contents;
 }
 
 pub fn sheet_to_data<'a>(
@@ -995,6 +1045,89 @@ pub fn create_lang_file(out_path: &String) -> usize {
                 val.to_string(),
                 source_filename.to_string()
             ])?;
+        }
+        sw.append_row(row![blank!(3)])
+    });
+    wbl.close()
+        .expect(format!("close {wbl_name} error!").as_str());
+    match write_result {
+        Ok(_) => (),
+        Err(_) => return 1,
+    };
+    return 0;
+}
+
+pub fn create_group_files(out_path: &String) -> usize {
+    let kv: HashMap<String, Vec<String>> = get_all_grouped_mods();
+    // GLOBAL_GROUP_NAMES
+    for (group_name, mod_names) in kv {
+        let result = create_group_file(&group_name, &get_ids_set(&mod_names), out_path);
+        if result > 0 {
+            return result;
+        }
+    }
+
+    return 0;
+}
+
+fn get_all_grouped_mods() -> HashMap<String, Vec<String>> {
+    let group_names = GLOBAL_GROUP_NAMES.read();
+    let mut uniq_groups: Vec<String> = vec![];
+    for (_mod_name, v) in group_names.iter() {
+        if !uniq_groups.contains(v) {
+            uniq_groups.push(v.to_string())
+        }
+    }
+
+    let mut contents: HashMap<String, Vec<String>> = HashMap::new();
+    for group_name in uniq_groups {
+        contents.insert(group_name.to_string(), find_group_mod_names(&group_name));
+    }
+    return contents;
+}
+
+fn get_ids_set(mod_names: &Vec<String>) -> AHashMap<String, Vec<String>> {
+    let mut ret: AHashMap<String, Vec<String>> = AHashMap::new();
+    for mod_name in mod_names {
+        let ids = GLOBAL_MOD_IDS.read().get(mod_name).unwrap().to_vec();
+        ret.insert(mod_name.to_string(), ids);
+    }
+    return ret;
+}
+
+fn create_group_file(
+    group_name: &String,
+    ids_set: &AHashMap<String, Vec<String>>,
+    out_path: &String,
+) -> usize {
+    let mut sorted_keys: Vec<String> = vec![];
+    for mod_name in ids_set.keys() {
+        sorted_keys.push(mod_name.to_string());
+    }
+    sorted_keys.sort();
+    let wbl_name = format!("Y映射表-{}.xlsx", group_name);
+    let mut wbl = Workbook::create(format!("{out_path}/{wbl_name}").as_str());
+    let mut sheetl = wbl.create_sheet("sheet1");
+    sheetl.add_column(Column { width: 30.0 });
+    sheetl.add_column(Column { width: 30.0 });
+    sheetl.add_column(Column { width: 80.0 });
+
+    let write_result = wbl.write_sheet(&mut sheetl, |sheet_writer| {
+        let sw: &mut SheetWriter<'_, '_> = sheet_writer;
+        let mod_name = format!("Data.Gruop{}", group_name);
+        sw.append_row(row!["MOD", mod_name.to_string(), ""])?;
+        sw.append_row(row!["BACK_TYPE", "uint64", "string"])?;
+        sw.append_row(row!["FRONT_TYPE", "uint64", "string"])?;
+        sw.append_row(row!["DES", "id", "id来源"])?;
+        sw.append_row(row!["NAMES", "id", "mod"])?;
+        sw.append_row(row!["ENUM", blank!(2)])?;
+        sw.append_row(row!["REF", blank!(2)])?;
+        sw.append_row(row![blank!(3)])?;
+        for key in &sorted_keys {
+            let ids = ids_set.get(key).unwrap();
+            for id in ids {
+                sw.append_row(row!["VALUE", id.to_string(), key.to_string()])?;
+            }
         }
         sw.append_row(row![blank!(3)])
     });
@@ -1315,8 +1448,12 @@ fn get_ref_primary_type(
 }
 
 fn to_hash_id(key: &String) -> u32 {
-    let digest = md5::compute(key);
-    return (u128::from_str_radix(&format!("{:x}", digest), 16).unwrap() % 4294967296) as u32;
+    if !key.is_empty() {
+        let digest = md5::compute(key);
+        return (u128::from_str_radix(&format!("{:x}", digest), 16).unwrap() % 4294967296) as u32;
+    } else {
+        return 0;
+    }
 }
 
 fn is_enum_none(value: &String) -> bool {
