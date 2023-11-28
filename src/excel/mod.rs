@@ -60,7 +60,7 @@ pub struct SheetData<'a> {
     describes: Vec<String>,
     enum_names: Vec<String>,
     values: Vec<Vec<&'a DataType>>,
-    force_mod: String,
+    force_mods: Vec<String>,
     export_columns: String,
     valid_columns: Vec<usize>,
     valid_front_types: Vec<String>,
@@ -415,8 +415,8 @@ end",
 
         let msg_name = self.mod_name.to_string().replace("Data.", "");
         let mut class_name = msg_name.to_string();
-        if !self.force_mod.is_empty() {
-            class_name = self.force_mod.to_string();
+        if self.force_mods.len() > 0 && !self.force_mods[1].is_empty() {
+            class_name = self.force_mods[1].to_string();
         }
 
         // let msg_enum = format!("{}", "");
