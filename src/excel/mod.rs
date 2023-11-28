@@ -51,7 +51,7 @@ pub struct SheetData<'a> {
     describes: Vec<String>,
     enum_names: Vec<String>,
     values: Vec<Vec<&'a DataType>>,
-    force_mods: Vec<String>,
+    force_mod: String,
     export_columns: String,
     valid_columns: Vec<usize>,
     valid_front_types: Vec<String>,
@@ -406,8 +406,8 @@ end",
 
         let msg_name = self.mod_name.to_string().replace("Data.", "");
         let mut class_name = msg_name.to_string();
-        if self.force_mods.len() > 0 && !self.force_mods[1].is_empty() {
-            class_name = self.force_mods[1].to_string();
+        if !self.force_mod.is_empty() {
+            class_name = self.force_mod.to_string();
         }
 
         // let msg_enum = format!("{}", "");
@@ -760,7 +760,7 @@ pub fn sheet_to_data<'a>(
     let mut describes: Vec<String> = vec![];
     let mut enum_names: Vec<String> = vec![];
     let mut row_num: usize = 0;
-    let mut force_mods: Vec<String> = vec![];
+    let mut force_mod: String = String::new();
     for row in sheet.rows() {
         row_num = row_num + 1;
         let mut st = row[0].to_string().trim().to_string();
@@ -800,8 +800,7 @@ pub fn sheet_to_data<'a>(
             }
         } else if st == "FORCE_MOD" {
             for v in row {
-                let mod_name = v.to_string().trim().to_string();
-                force_mods.push(mod_name);
+                force_mod = v.to_string().trim().to_string();
             }
         } else if st == "VALUE" {
             let mut row_value: Vec<&DataType> = vec![];
@@ -905,7 +904,7 @@ pub fn sheet_to_data<'a>(
         refs: refs,
         describes: describes,
         enum_names: enum_names,
-        force_mods: force_mods,
+        force_mod: force_mod,
         export_columns: export_columns,
         valid_columns,
         valid_front_types,
