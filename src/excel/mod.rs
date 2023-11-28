@@ -1115,7 +1115,7 @@ fn create_group_file(
 
     let write_result = wbl.write_sheet(&mut sheetl, |sheet_writer| {
         let sw: &mut SheetWriter<'_, '_> = sheet_writer;
-        let mod_name = format!("Data.Gruop{}", group_name);
+        let mod_name = format!("Data.Group{}", group_name);
         sw.append_row(row!["MOD", mod_name.to_string(), ""])?;
         sw.append_row(row!["BACK_TYPE", "uint64", "string"])?;
         sw.append_row(row!["FRONT_TYPE", "uint64", "string"])?;
