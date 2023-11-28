@@ -810,7 +810,7 @@ pub fn sheet_to_data<'a>(
     let mut describes: Vec<String> = vec![];
     let mut enum_names: Vec<String> = vec![];
     let mut row_num: usize = 0;
-    let mut force_mod: String = String::new();
+    let mut force_mods = vec![];
     for row in sheet.rows() {
         row_num = row_num + 1;
         let mut st = row[0].to_string().trim().to_string();
@@ -850,7 +850,8 @@ pub fn sheet_to_data<'a>(
             }
         } else if st == "FORCE_MOD" {
             for v in row {
-                force_mod = v.to_string().trim().to_string();
+                let mod_name = v.to_string().trim().to_string();
+                force_mods.push(mod_name);
             }
         } else if st == "VALUE" {
             let mut row_value: Vec<&DataType> = vec![];
@@ -954,7 +955,7 @@ pub fn sheet_to_data<'a>(
         refs: refs,
         describes: describes,
         enum_names: enum_names,
-        force_mod: force_mod,
+        force_mods: force_mods,
         export_columns: export_columns,
         valid_columns,
         valid_front_types,
