@@ -28,6 +28,16 @@ CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo build --release
 
 `static_init` 已更新到 `1.0.4`，以兼容 Rust 1.93 及更新版本。
 
+## CI 产物
+
+GitHub Actions 会构建以下 release 二进制：
+
+- macOS arm64：`extool-macos-arm64.tar.gz`
+- Windows x64：`extool-windows-x64.zip`
+- Linux x64：`extool-linux-x64.tar.gz`
+
+可以在 Actions 页面的 workflow artifacts 中下载。
+
 ## 使用
 
 ### Excel 导出

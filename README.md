@@ -28,6 +28,16 @@ CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo build --release
 
 `static_init` is updated to `1.0.4` for compatibility with Rust 1.93 and newer.
 
+## CI Artifacts
+
+GitHub Actions builds release binaries for:
+
+- macOS arm64: `extool-macos-arm64.tar.gz`
+- Windows x64: `extool-windows-x64.zip`
+- Linux x64: `extool-linux-x64.tar.gz`
+
+Download them from the workflow artifacts on the Actions page.
+
 ## Usage
 
 ### Excel Export
