@@ -43,7 +43,7 @@ struct Args {
     ///导出格式 NONE | JSON | LUA | EX | CS | PBD | LANG | GROUP
     #[clap(short, long, value_parser, default_value = "NONE")]
     format: String,
-    ///是否允许多sheets导出 TRUE|FALSE
+    ///是否扫描所有Sheet TRUE|FALSE。用于允许文档Sheet；一个文件仍只允许一个数据Sheet
     #[clap(short, long, value_parser, default_value = "FALSE")]
     multi_sheets: String,
     ///导出的列 FRONT|BACK|BOTH
@@ -73,31 +73,50 @@ fn main() -> Result<(), usize> {
     }
 }
 
-fn all_files(path_str: &str, exts: Vec<String>) -> Vec<String> {
+fn all_files(path_str: &str, exts: Vec<String>) -> Result<Vec<String>, String> {
     let mut res: Vec<String> = vec![];
 
-    let objects = fs::read_dir(path_str).unwrap();
+    let objects =
+        fs::read_dir(path_str).map_err(|err| format!("读取目录失败 [{}]: {}", path_str, err))?;
     for obj in objects {
-        let path = obj.unwrap().path();
-        let file_name = path.file_name().unwrap().to_str().unwrap();
+        let path = obj
+            .map_err(|err| format!("读取目录项失败 [{}]: {}", path_str, err))?
+            .path();
+        if !path.is_file() {
+            continue;
+        }
+        let file_name = match path.file_name().and_then(|value| value.to_str()) {
+            Some(value) => value,
+            None => continue,
+        };
         if file_name.starts_with("~$") {
             continue;
         }
         match path.extension() {
-            Some(x) if exts.iter().any(|e| e.as_str() == x) => {
+            Some(x)
+                if x.to_str()
+                    .map(|value| exts.iter().any(|e| e.eq_ignore_ascii_case(value)))
+                    .unwrap_or(false) =>
+            {
                 let p_str = format!("{}", path.display());
                 res.push(p_str);
             }
             _ => {}
         }
     }
-    res
+    Ok(res)
 }
 
 fn gen_from_excel(args: Args) -> usize {
     let now = SystemTime::now();
     info!("导出格式: {} ", args.format);
-    let xls_files = all_xls(args.input_path.as_str());
+    let xls_files = match all_xls(args.input_path.as_str()) {
+        Ok(files) => files,
+        Err(err) => {
+            error!("{}", err);
+            return 1;
+        }
+    };
     let pool_size = num_cpus::get();
 
     let mut pool = ThreadPool::new(pool_size);
@@ -105,21 +124,32 @@ fn gen_from_excel(args: Args) -> usize {
 
     //******************* BUILD ID   ***************
     info!("开始构建全局索引并进行ID检查 ...");
+    let mut build_jobs = 0usize;
+    let mut err_flag: usize = 0;
     for file in &xls_files {
         let file1 = file.clone();
         let tx = tx.clone();
         let multi_sheets = args.multi_sheets.clone().to_uppercase() == "TRUE";
         let export_columns = args.export_columns.clone().to_uppercase();
-        pool.execute(move || {
+        match pool.execute(move || {
             let code = excel::build_id(file1, multi_sheets, export_columns);
-            tx.send(code).unwrap();
-        })
-        .ok();
+            tx.send(code).ok();
+        }) {
+            Ok(_) => build_jobs += 1,
+            Err(err) => {
+                error!("提交构建索引任务失败: {:?}", err);
+                err_flag += 1;
+            }
+        }
     }
-    let mut err_flag: usize = 0;
-    for _ in 0..xls_files.len() {
-        let result = rc.recv().unwrap();
-        err_flag = err_flag + result
+    for _ in 0..build_jobs {
+        match rc.recv() {
+            Ok(result) => err_flag += result,
+            Err(err) => {
+                error!("接收构建索引任务结果失败: {:?}", err);
+                err_flag += 1;
+            }
+        }
     }
     if err_flag > 0 {
         pool.clear();
@@ -128,6 +158,7 @@ fn gen_from_excel(args: Args) -> usize {
     }
     let pbe_path = format!("{}/enum/{}", args.input_path, args.pbe_file);
     //******************* EXPORT FILE  ***************//
+    let mut export_jobs = 0usize;
     for file in &xls_files {
         let file1 = file.clone();
         let tx = tx.clone();
@@ -136,7 +167,7 @@ fn gen_from_excel(args: Args) -> usize {
         let multi_sheets = args.multi_sheets.clone().to_uppercase() == "TRUE";
         let export_columns = args.export_columns.clone().to_uppercase();
         let pbe_path = pbe_path.clone();
-        pool.execute(move || {
+        match pool.execute(move || {
             let code = excel::xls_to_file(
                 file1,
                 dst_path,
@@ -145,13 +176,23 @@ fn gen_from_excel(args: Args) -> usize {
                 export_columns,
                 pbe_path,
             );
-            tx.send(code).unwrap();
-        })
-        .ok();
+            tx.send(code).ok();
+        }) {
+            Ok(_) => export_jobs += 1,
+            Err(err) => {
+                error!("提交导出任务失败: {:?}", err);
+                err_flag += 1;
+            }
+        }
     }
-    for _ in 0..xls_files.len() {
-        let result = rc.recv().unwrap();
-        err_flag = err_flag + result;
+    for _ in 0..export_jobs {
+        match rc.recv() {
+            Ok(result) => err_flag += result,
+            Err(err) => {
+                error!("接收导出任务结果失败: {:?}", err);
+                err_flag += 1;
+            }
+        }
     }
     pool.clear();
     pool.close();
@@ -192,7 +233,7 @@ fn gen_from_excel(args: Args) -> usize {
     return 0;
 }
 
-fn all_xls(path_str: &str) -> Vec<String> {
+fn all_xls(path_str: &str) -> Result<Vec<String>, String> {
     all_files(
         path_str,
         [String::from("xlsx"), String::from("xls")].to_vec(),
@@ -201,7 +242,13 @@ fn all_xls(path_str: &str) -> Vec<String> {
 
 fn gen_from_proto(args: Args) -> usize {
     let exts = [String::from("proto")].to_vec();
-    let files = all_files(args.input_path.as_str(), exts);
+    let files = match all_files(args.input_path.as_str(), exts) {
+        Ok(files) => files,
+        Err(err) => {
+            error!("{}", err);
+            return 1;
+        }
+    };
     proto::create(files, &args.output_path, &args.format, &args.type_input);
     return 0;
 }
