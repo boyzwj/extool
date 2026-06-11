@@ -4,7 +4,7 @@ version = "1.2.0"
 authors = ["zhangwenjie@qq.com"]
 
 [dependencies]
-static_init = "1.0.2"
+static_init = "1.0.4"
 quote = "1.0.18"
 serde = "1.0.137"
 serde_derive = "1.0.137"
